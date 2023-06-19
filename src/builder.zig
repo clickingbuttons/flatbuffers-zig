@@ -81,8 +81,13 @@ pub const Builder = struct {
     }
 
     pub fn appendTableFieldOffset(self: *Self, offset_: Offset) !void {
+        try self.prep(Offset, 0); // The offset we write needs to include padding
         try self.prepend(self.offset() - offset_ + @sizeOf(Offset));
         try self.vtable.append(@intCast(VOffset, self.offset()));
+    }
+
+    pub fn appendTableFieldDefault(self: *Self) !void {
+        try self.vtable.append(@as(VOffset, 0));
     }
 
     fn writeVTable(self: *Self) !void {
@@ -92,7 +97,12 @@ pub const Builder = struct {
         try self.prepend(@intCast(Offset, vtable_len)); // offset to start of vtable
         const vtable_start = self.offset();
         for (0..n_items) |i| {
-            try self.prepend(@intCast(VOffset, vtable_start - self.vtable.items[n_items - i - 1]));
+            const offset_ = self.vtable.items[n_items - i - 1];
+            if (offset_ == 0) {
+                try self.prepend(offset_);
+            } else {
+                try self.prepend(@intCast(VOffset, vtable_start - offset_));
+            }
         }
         try self.prepend(@intCast(VOffset, vtable_start - self.table_start)); // table len
         try self.prepend(@intCast(VOffset, vtable_len)); // vtable len
@@ -246,7 +256,7 @@ test "prepend object with vector" {
         4, 0, // offset to field 1 from vtable start
         // vtable start
         8, 0, 0, 0, // negative offset to start of vtable from here
-        6, 0, 0, 0, // field 1 (vector offset from here)
+        8, 0, 0, 0, // field 1 (vector offset from here)
         0, 0, // padding
         0x37, 0, // field 0
         // table start
@@ -269,7 +279,7 @@ const Vec3 = extern struct {
     z: f32,
 };
 
-pub fn exampleMonster(allocator: Allocator) ![]const u8 {
+pub fn exampleMonster(allocator: Allocator) ![]u8 {
     var builder = Builder.init(allocator);
 
     const weapon_name = try builder.prependString("sword");
@@ -281,60 +291,64 @@ pub fn exampleMonster(allocator: Allocator) ![]const u8 {
     const monster_name = try builder.prependString("orc");
     const inventory = try builder.prependVector(u8, &[_]u8{ 1, 2, 3 });
     const weapons = try builder.prependVector(u32, &[_]u32{weapon});
+    const path = try builder.prependVector(Vec3, &[_]Vec3{.{ .x = 4, .y = 5, .z = 6 }});
 
     try builder.startTable();
     try builder.appendTableField(Vec3, .{ .x = 1, .y = 2, .z = 3 }); // field 0 (pos)
     try builder.appendTableField(i16, 100); // field 1 (mana)
     try builder.appendTableField(i16, 200); // field 2 (hp)
     try builder.appendTableFieldOffset(monster_name); // field 3 (name)
-    try builder.appendTableFieldOffset(inventory); // field 4 (inventory)
-    try builder.appendTableField(Color, .green); // field 5 (color)
-    try builder.appendTableFieldOffset(weapons); // field 6 (weapons)
-    try builder.appendTableField(u8, 0); // field 7 (equipment type)
-    try builder.appendTableFieldOffset(weapons); // field 7 (equipment value)
-    try builder.appendTableField(Vec3, .{ .x = 4, .y = 5, .z = 6 }); // field 8 (path)
+    try builder.appendTableFieldDefault(); // field 4 (friendly, deprecated)
+    try builder.appendTableFieldOffset(inventory); // field 5 (inventory)
+    try builder.appendTableField(Color, .green); // field 6 (color)
+    try builder.appendTableFieldOffset(weapons); // field 7 (weapons)
+    try builder.appendTableField(u8, 0); // field 8 (equipment type)
+    try builder.appendTableFieldOffset(weapons); // field 9 (equipment value)
+    try builder.appendTableFieldOffset(path); // field 10 (path)
     _ = try builder.endTable();
 
-    return builder.toOwnedSlice();
+    return @constCast(builder.toOwnedSlice());
 }
 
 test "build monster" {
+    // annotated to make debugging Table easier
     const bytes = try exampleMonster(testing.allocator);
     defer testing.allocator.free(bytes);
     try testing.expectEqualSlices(u8, &[_]u8{
-        24, 0, // vtable len
-        72, 0, // table len
-        52, 0, // offset to field 0 from vtable start
-        50, 0, // offset to field 1 from vtable start
-        48, 0, // offset to field 2 from vtable start
-        44, 0, // offset to field 3 from vtable start
-        40, 0, // offset to field 4 from vtable start
-        39, 0, // offset to field 5 from vtable start
-        32, 0, // offset to field 6 from vtable start
-        31, 0, // offset to field 7 from vtable start
-        24, 0, // offset to field 8 from vtable start
-        4, 0, // offset to field 9 from vtable start
+        26, 0, // vtable len
+        48, 0, // table len
+        36, 0, // offset to field  0 from vtable start (pos)
+        34, 0, // offset to field  1 from vtable start (mana)
+        32, 0, // offset to field  2 from vtable start (hp)
+        28, 0, // offset to field  3 from vtable start (name)
+        0, 0, //  offset to field  4 from vtable start (friendly)
+        24, 0, // offset to field  5 from vtable start (inventory
+        23, 0, // offset to field  6 from vtable start (color)
+        16, 0, // offset to field  7 from vtable start (weapons)
+        15, 0, // offset to field  8 from vtable start (equipment type)
+        8, 0, //  offset to field  9 from vtable start (equipment value)
+        4, 0, //  offset to field 10 from vtable start (path)
         // vtable start (monster)
-        24, 0, 0, 0, // negative offset to start of vtable from here
-        0, 0, 0x80, 0x40, // 4.0 ... field 8 (path)
-        0, 0, 0xA0, 0x40, // 5.0
-        0, 0, 0xC0, 0x40, // 6.0
-        0, 0, 0x00, 0x00,
-        0, 0, 0x00, 0x00, // ???
-        45, 0, 0, 0, // field 7 offset from here (equipment value)
-        0, 0, 0, 0, // field 7 (equipment type)
-        37, 0, 0, 0, // field 6 offset from here (weapons)
-        0, 0, 0, @enumToInt(Color.green), // field 5 (color)
-        40, 0, 0, 0, // field 4 offset from here (inventory)
-        44, 0, 0, 0, // field 3 offset from here (name)
-        200, 0, // field 2 (hp)
-        100, 0, // field 1 (mana)
+        26, 0, 0, 0, // negative offset to start of vtable from here
+        44, 0, 0, 0, // field 10 offset from here (path)
+        64, 0, 0, 0, // field 9 offset from here (eqipment value)
+        0, 0, 0, 0, // field 8 (equipment type)
+        56, 0, 0, 0, // field 7 offset from here (weapons)
+        0, 0, 0, @enumToInt(Color.green), // field 6 (color)
+        56, 0, 0, 0, // field 5 offset from here (inventory)
+        60, 0, 0, 0, // field 3 offset from here (name)
+        200, 0x00, // field 2 (hp)
+        100, 0x00, // field 1 (mana)
         0, 0, 0x80, 0x3F, // 1.0 ... field 0 (pos)
         0, 0, 0x00, 0x40, // 2.0
-        0, 0, 0x40, 0x40, // 3.0
+        0, 0, 0x40, 0x40, // 2.0
         // table start (monster)
-        0, 0, 0,    0,
-        0, 0, 0,    0,
+        1, 0, 0, 0, // path len
+        0, 0, 0x80, 0x40, // 4.0 ... field 10 (path)
+        0, 0, 0xA0, 0x40, // 5.0
+        0, 0, 0xC0, 0x40, // 6.0
+        0, 0, 0, 0, // padding
+        0, 0, 0, 0, // more padding
         1, 0, 0, 0, // weapons len
         32, 0, 0, 0, // weapons data (offset from here)
         3, 0, 0, 0, // inventory len
@@ -347,7 +361,7 @@ test "build monster" {
         8, 0, // offset to field 0 from vtable start
         6, 0, // offset to field 1 from vtable start
         // vtable start (weapon)
-        8, 0, 0, 0, // negative offset to start of vtable start
+        8, 0, 0, 0, // negative offset to start of vtable from here
         0, 0, 0x32, 0x00, // field 1 (damage)
         4, 0, 0, 0, // field 2 offset from here (name)
         // table start (weapon)

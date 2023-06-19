@@ -18,7 +18,7 @@ pub const Weapon = struct {
     damage: i16,
 };
 
-pub const PackedWeapon = extern struct {
+pub const PackedWeapon = struct {
     flatbuffer: flatbuffers.Table,
 
     pub const Self = @This();
@@ -27,12 +27,12 @@ pub const PackedWeapon = extern struct {
         return .{ .vtable = bytes };
     }
 
-    pub fn name(self: Self) i16 {
-        return self.flatbuffer.readField(0, []const u8);
+    pub fn name(self: Self) [:0]u8 {
+        return self.flatbuffer.readField([:0]u8, 0);
     }
 
     pub fn damage(self: Self) i16 {
-        return self.flatbuffer.readField(1, i16);
+        return self.flatbuffer.readField(i16, 1);
     }
 };
 
@@ -57,41 +57,45 @@ pub const PackedMonster = struct {
 
     pub const Self = @This();
 
+    pub fn init(bytes: []u8) Self {
+        return .{ .flatbuffer = .{ .vtable = @ptrCast([*]u8, bytes) } };
+    }
+
     pub fn pos(self: Self) Vec3 {
-        return self.flatbuffer.readField(0, Vec3);
+        return self.flatbuffer.readField(Vec3, 0);
     }
 
     pub fn mana(self: Self) i16 {
-        return self.flatbuffer.readFieldWithDefault(1, i16, 150);
+        return self.flatbuffer.readFieldWithDefault(i16, 1, 150);
     }
 
     pub fn hp(self: Self) i16 {
-        return self.flatbuffer.readFieldWithDefault(2, i16, 100);
+        return self.flatbuffer.readFieldWithDefault(i16, 2, 100);
     }
 
-    pub fn name(self: Self) i16 {
-        return self.flatbuffer.readField(3, []const u8);
+    pub fn name(self: Self) [:0]u8 {
+        return self.flatbuffer.readField([:0]u8, 3);
     }
 
     pub fn inventory(self: Self) []u8 {
-        return self.flatbuffer.readField(5, []u8);
+        return self.flatbuffer.readField([]u8, 5);
     }
 
     pub fn color(self: Self) Color {
-        return self.flatbuffer.readFieldWithDefault(6, Color, .blue);
+        return self.flatbuffer.readFieldWithDefault(Color, 6, .blue);
     }
 
     pub fn weaponsLen(self: Self) u32 {
-        return self.flatbuffer.readField(7, u32);
+        return self.flatbuffer.readFieldVectorLen(7);
     }
-    pub fn weapons(self: Self, i: usize) PackedWeapon {
-        return self.flatbuffer.readFieldVector(7, PackedWeapon, i);
+    pub fn weapons(self: Self, i: u32) PackedWeapon {
+        return self.flatbuffer.readFieldVectorItem(PackedWeapon, 7, i);
     }
 
     pub fn pathsLen(self: Self) u32 {
-        return self.flatbuffer.readField(8, u32);
+        return self.flatbuffer.readFieldVectorLen(10);
     }
-    pub fn paths(self: Self, i: usize) Vec3 {
-        return self.flatbuffer.readFieldVector(8, Vec3, i);
+    pub fn paths(self: Self, i: u32) Vec3 {
+        return self.flatbuffer.readFieldVectorItem(Vec3, 10, i);
     }
 };
