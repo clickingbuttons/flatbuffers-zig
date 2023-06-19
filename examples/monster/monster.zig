@@ -36,8 +36,11 @@ pub const PackedWeapon = struct {
     }
 };
 
-pub const Equipment = union(enum) {
-    Weapon: Weapon,
+pub const PackedEquipment = union(enum) {
+    none: void,
+    weapon: PackedWeapon,
+
+    pub const Tag = @import("std").meta.Tag(@This());
 };
 
 pub const Monster = struct {
@@ -48,7 +51,7 @@ pub const Monster = struct {
     inventory: []u8,
     color: Color = .blue,
     weapons: []Weapon,
-    equipped: Equipment,
+    equipped: PackedEquipment,
     path: Vec3,
 };
 
@@ -57,8 +60,12 @@ pub const PackedMonster = struct {
 
     pub const Self = @This();
 
-    pub fn init(bytes: []u8) Self {
-        return .{ .flatbuffer = .{ .vtable = @ptrCast([*]u8, bytes) } };
+    pub fn init(table_bytes: []u8) Self {
+        return .{ .flatbuffer = .{ .table = @ptrCast([*]u8, table_bytes) } };
+    }
+
+    pub fn initRoot(bytes: []u8) Self {
+        return Self.init(bytes[flatbuffers.Table.readVOffset(bytes)..]);
     }
 
     pub fn pos(self: Self) Vec3 {
@@ -90,6 +97,16 @@ pub const PackedMonster = struct {
     }
     pub fn weapons(self: Self, i: u32) PackedWeapon {
         return self.flatbuffer.readFieldVectorItem(PackedWeapon, 7, i);
+    }
+
+    pub fn equippedTag(self: Self) PackedEquipment.Tag {
+        return self.flatbuffer.readField(PackedEquipment.Tag, 8);
+    }
+    pub fn equipped(self: Self) PackedEquipment {
+        return switch (self.equippedTag()) {
+            .none => .none,
+            .weapon => .{ .weapon = self.flatbuffer.readField(PackedWeapon, 9) },
+        };
     }
 
     pub fn pathsLen(self: Self) u32 {

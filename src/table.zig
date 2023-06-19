@@ -6,17 +6,23 @@ const Offset = types.Offset;
 const VOffset = types.VOffset;
 
 pub const Table = struct {
-    vtable: [*]u8,
+    table: [*]u8,
 
     const Self = @This();
 
     fn getField(self: Self, id: VOffset) ?[*]u8 {
-        const vtable = @ptrCast([*]VOffset, @alignCast(@alignOf(VOffset), self.vtable));
+        const vtable_offset = readOffset(self.table);
+        const vtable = @ptrCast([*]VOffset, @alignCast(@alignOf(VOffset), self.table - vtable_offset));
         const vtable_len = vtable[0];
+        std.debug.assert(id < vtable_len);
         const byte_offset = vtable[id + 2];
         if (byte_offset == 0) return null;
 
-        return self.vtable + vtable_len + byte_offset;
+        return self.table + byte_offset;
+    }
+
+    pub fn readVOffset(bytes: []u8) VOffset {
+        return std.mem.readIntLittle(VOffset, @ptrCast(*const [@sizeOf(VOffset)]u8, bytes));
     }
 
     fn readOffset(bytes: [*]u8) Offset {
@@ -25,13 +31,11 @@ pub const Table = struct {
 
     pub fn readField(self: Self, comptime T: type, id: VOffset) T {
         const bytes = self.getField(id).?;
+        if (comptime isScalar(T)) return std.mem.bytesToValue(T, bytes[0..@sizeOf(T)]);
+        const offset = readOffset(bytes);
         switch (@typeInfo(T)) {
-            .Bool, .Int, .Float, .Struct => {
-                const casted = bytes[0..@sizeOf(T)];
-                return std.mem.bytesToValue(T, casted);
-            },
+            .Struct => return T{ .flatbuffer = .{ .table = bytes + offset } },
             .Pointer => |p| {
-                const offset = readOffset(bytes);
                 const len = readOffset(bytes + offset);
                 const data = (bytes + offset + @sizeOf(Offset))[0..len];
 
@@ -42,7 +46,6 @@ pub const Table = struct {
                 return @ptrCast([]p.child, data);
             },
             // .Array: Array,
-            // .Enum: Enum,
             // .Union: Union,
             else => |t| @compileError(std.fmt.comptimePrint("invalid type {any}", .{t})),
         }
@@ -82,20 +85,17 @@ pub const Table = struct {
         std.debug.assert(index < len);
         offset += @sizeOf(Offset);
 
-        offset += index * @sizeOf(Offset);
-
         if (comptime isScalar(T)) {
+            offset += index * @sizeOf(T);
             const data = (bytes + offset)[0..@sizeOf(T)];
             return std.mem.bytesToValue(T, data);
         } else {
+            offset += index * @sizeOf(Offset);
             const offset2 = readOffset(bytes + offset);
-            offset += offset2 - @sizeOf(Offset);
-
-            const offset3 = readOffset(bytes + offset);
-            offset -= offset3;
+            offset += offset2;
             const data = bytes + offset;
 
-            return T{ .flatbuffer = .{ .vtable = data } };
+            return T{ .flatbuffer = .{ .table = data } };
         }
     }
 };
