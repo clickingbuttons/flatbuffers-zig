@@ -1,0 +1,10 @@
+- [x] arrays
+- [x] packing/unpacking
+- [ ] safety
+- codegen
+	- generate .bfbs (make flatc fork)
+	- handwrite reflection.zig
+options:
+- casing
+- required
+- setters

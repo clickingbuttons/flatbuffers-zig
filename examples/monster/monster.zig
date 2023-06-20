@@ -1,10 +1,15 @@
-// Will eventually be codegenned.
+// Handwritten to match codegen against.
 const flatbuffers = @import("flatbuffers-zig");
+const std = std;
 
 pub const Color = enum(u8) {
     red = 0,
     green,
     blue = 2,
+};
+
+pub const Vec4 = extern struct {
+    v: [4]f32,
 };
 
 pub const Vec3 = extern struct {
@@ -16,6 +21,23 @@ pub const Vec3 = extern struct {
 pub const Weapon = struct {
     name: []const u8,
     damage: i16,
+
+    pub const Self = @This();
+
+    pub fn init(packed_: PackedWeapon) Self {
+        return .{
+            .name = packed_.name(),
+            .damage = packed_.damage(),
+        };
+    }
+
+    pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
+        const field_offsets = .{ .name = try builder.prependString(self.name) };
+        try builder.startTable();
+        try builder.appendTableFieldOffset(field_offsets.name); // field 0
+        try builder.appendTableField(?i16, self.damage); // field 1
+        return try builder.endTable();
+    }
 };
 
 pub const PackedWeapon = struct {
@@ -23,8 +45,12 @@ pub const PackedWeapon = struct {
 
     pub const Self = @This();
 
-    pub fn init(bytes: [*]u8) Self {
-        return .{ .vtable = bytes };
+    pub fn initTable(table_bytes: []u8) Self {
+        return .{ .flatbuffer = .{ .table = @ptrCast([*]u8, table_bytes) } };
+    }
+
+    pub fn init(root_bytes: []u8) Self {
+        return Self.initTable(root_bytes[flatbuffers.Table.readVOffset(root_bytes)..]);
     }
 
     pub fn name(self: Self) [:0]u8 {
@@ -36,11 +62,54 @@ pub const PackedWeapon = struct {
     }
 };
 
+pub const Equipment = union(enum) {
+    none: void,
+    weapon: Weapon,
+
+    pub const Tag = std.meta.Tag(@This());
+    pub const Self = @This();
+
+    pub fn init(packed_: PackedEquipment) Self {
+        switch (packed_) {
+            inline else => |v, t| {
+                var result = @unionInit(Self, @tagName(t), undefined);
+                const field = &@field(result, @tagName(t));
+                const Field = @TypeOf(field.*);
+                field.* = if (comptime flatbuffers.Table.isScalar(Field)) v else Field.init(v);
+                return result;
+            },
+        }
+    }
+
+    pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
+        switch (self) {
+            inline else => |v| {
+                if (comptime flatbuffers.Table.isScalar(@TypeOf(v))) {
+                    try builder.prepend(v);
+                    return builder.offset();
+                }
+                return try v.pack(builder);
+            },
+        }
+    }
+
+    pub fn appendVTable(self: Self, builder: *flatbuffers.Builder, offset: u32) !void {
+        switch (self) {
+            inline else => |v| {
+                if (comptime flatbuffers.Table.isScalar(@TypeOf(v))) {
+                    try builder.appendTableFieldOffset(offset);
+                }
+                try builder.appendTableField(@TypeOf(v), v);
+            },
+        }
+    }
+};
+
 pub const PackedEquipment = union(enum) {
     none: void,
     weapon: PackedWeapon,
 
-    pub const Tag = @import("std").meta.Tag(@This());
+    pub const Tag = std.meta.Tag(@This());
 };
 
 pub const Monster = struct {
@@ -51,8 +120,73 @@ pub const Monster = struct {
     inventory: []u8,
     color: Color = .blue,
     weapons: []Weapon,
-    equipped: PackedEquipment,
-    path: Vec3,
+    equipped: Equipment,
+    path: []Vec3,
+    rotation: Vec4,
+
+    pub const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator, packed_: PackedMonster) !Self {
+        return Monster{
+            .pos = packed_.pos(),
+            .mana = packed_.mana(),
+            .hp = packed_.hp(),
+            .name = packed_.name(),
+            .inventory = packed_.inventory(),
+            .color = packed_.color(),
+            .weapons = brk: {
+                var res = try allocator.alloc(Weapon, packed_.weaponsLen());
+                for (res, 0..) |*r, i| {
+                    r.* = Weapon.init(packed_.weapons(@intCast(u32, i)));
+                }
+                break :brk res;
+            },
+            .equipped = Equipment.init(packed_.equipped()),
+            .path = brk: {
+                const path = packed_.path();
+                var res = try allocator.alloc(Vec3, path.len);
+                for (0..path.len) |i| res[i] = path[i];
+                break :brk res;
+            },
+            .rotation = packed_.rotation(),
+        };
+    }
+
+    pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+        allocator.free(self.path);
+        allocator.free(self.weapons);
+    }
+
+    pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
+        const field_offsets = .{
+            .name = try builder.prependString(self.name),
+            .inventory = try builder.prependVector(u8, self.inventory),
+            .weapons = brk: {
+                const allocator = builder.buffer.allocator;
+                var offsets = try allocator.alloc(u32, self.weapons.len);
+                defer allocator.free(offsets);
+                for (self.weapons, 0..) |w, i| offsets[i] = try w.pack(builder);
+                break :brk try builder.prependOffsets(offsets);
+            },
+            .equipped = try self.equipped.pack(builder),
+            .path = try builder.prependVector(Vec3, self.path),
+        };
+
+        try builder.startTable();
+        try builder.appendTableField(Vec3, self.pos); // field 0
+        try builder.appendTableField(i16, self.mana); // field 1
+        try builder.appendTableField(i16, self.hp); // field 2
+        try builder.appendTableFieldOffset(field_offsets.name); // field 3
+        try builder.appendTableFieldOffset(0); // field 4 (friendly, deprecated)
+        try builder.appendTableFieldOffset(field_offsets.inventory); // field 5
+        try builder.appendTableField(Color, self.color); // field 6
+        try builder.appendTableFieldOffset(field_offsets.weapons); // field 7
+        try builder.appendTableField(Equipment, self.equipped); // field 8
+        try builder.appendTableFieldOffset(field_offsets.equipped); // field 9
+        try builder.appendTableFieldOffset(field_offsets.path); // field 10
+        try builder.appendTableField(Vec4, self.rotation); // field 11
+        return try builder.endTable();
+    }
 };
 
 pub const PackedMonster = struct {
@@ -60,12 +194,12 @@ pub const PackedMonster = struct {
 
     pub const Self = @This();
 
-    pub fn init(table_bytes: []u8) Self {
+    pub fn initTable(table_bytes: []u8) Self {
         return .{ .flatbuffer = .{ .table = @ptrCast([*]u8, table_bytes) } };
     }
 
-    pub fn initRoot(bytes: []u8) Self {
-        return Self.init(bytes[flatbuffers.Table.readVOffset(bytes)..]);
+    pub fn init(root_bytes: []u8) Self {
+        return Self.initTable(root_bytes[flatbuffers.Table.readVOffset(root_bytes)..]);
     }
 
     pub fn pos(self: Self) Vec3 {
@@ -100,19 +234,24 @@ pub const PackedMonster = struct {
     }
 
     pub fn equippedTag(self: Self) PackedEquipment.Tag {
-        return self.flatbuffer.readField(PackedEquipment.Tag, 8);
+        return self.flatbuffer.readFieldWithDefault(PackedEquipment.Tag, 8, .none);
     }
     pub fn equipped(self: Self) PackedEquipment {
         return switch (self.equippedTag()) {
-            .none => .none,
-            .weapon => .{ .weapon = self.flatbuffer.readField(PackedWeapon, 9) },
+            inline else => |t| {
+                var result = @unionInit(PackedEquipment, @tagName(t), undefined);
+                const field = &@field(result, @tagName(t));
+                field.* = self.flatbuffer.readField(@TypeOf(field.*), 9);
+                return result;
+            },
         };
     }
 
-    pub fn pathsLen(self: Self) u32 {
-        return self.flatbuffer.readFieldVectorLen(10);
+    pub fn path(self: Self) []align(1) Vec3 {
+        return self.flatbuffer.readFieldVectorSlice(Vec3, 10);
     }
-    pub fn paths(self: Self, i: u32) Vec3 {
-        return self.flatbuffer.readFieldVectorItem(Vec3, 10, i);
+
+    pub fn rotation(self: Self) Vec4 {
+        return self.flatbuffer.readField(Vec4, 11);
     }
 };

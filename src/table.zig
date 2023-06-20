@@ -12,7 +12,9 @@ pub const Table = struct {
 
     fn getField(self: Self, id: VOffset) ?[*]u8 {
         const vtable_offset = readOffset(self.table);
-        const vtable = @ptrCast([*]VOffset, @alignCast(@alignOf(VOffset), self.table - vtable_offset));
+        const vtable_soffset = @bitCast(i32, vtable_offset);
+        const loc = if (vtable_soffset < 0) self.table + @intCast(usize, -vtable_soffset) else self.table - vtable_offset;
+        const vtable = @ptrCast([*]VOffset, @alignCast(@alignOf(VOffset), loc));
         const vtable_len = vtable[0];
         std.debug.assert(id < vtable_len);
         const byte_offset = vtable[id + 2];
@@ -30,11 +32,20 @@ pub const Table = struct {
     }
 
     pub fn readField(self: Self, comptime T: type, id: VOffset) T {
+        if (T == void) return {};
+        // const bytes = if (self.getField(id)) |b| b else {
+        //     return if (comptime isScalar(T)) 0 else null;
+        // };
         const bytes = self.getField(id).?;
-        if (comptime isScalar(T)) return std.mem.bytesToValue(T, bytes[0..@sizeOf(T)]);
+
+        const Child = switch (@typeInfo(T)) {
+            .Optional => |o| o.child,
+            else => T,
+        };
+        if (comptime isScalar(Child)) return std.mem.bytesToValue(Child, bytes[0..@sizeOf(Child)]);
         const offset = readOffset(bytes);
-        switch (@typeInfo(T)) {
-            .Struct => return T{ .flatbuffer = .{ .table = bytes + offset } },
+        switch (@typeInfo(Child)) {
+            .Struct => return Child{ .flatbuffer = .{ .table = bytes + offset } },
             .Pointer => |p| {
                 const len = readOffset(bytes + offset);
                 const data = (bytes + offset + @sizeOf(Offset))[0..len];
@@ -45,8 +56,6 @@ pub const Table = struct {
                 }
                 return @ptrCast([]p.child, data);
             },
-            // .Array: Array,
-            // .Union: Union,
             else => |t| @compileError(std.fmt.comptimePrint("invalid type {any}", .{t})),
         }
     }
@@ -69,9 +78,9 @@ pub const Table = struct {
         return 0;
     }
 
-    fn isScalar(comptime T: type) bool {
+    pub fn isScalar(comptime T: type) bool {
         return switch (@typeInfo(T)) {
-            .Bool, .Int, .Float, .Array, .Enum => true,
+            .Void, .Bool, .Int, .Float, .Array, .Enum => true,
             .Struct => |s| s.layout == .Extern,
             else => false,
         };
@@ -98,6 +107,19 @@ pub const Table = struct {
             return T{ .flatbuffer = .{ .table = data } };
         }
     }
+
+    pub fn readFieldVectorSlice(self: Self, comptime T: type, id: VOffset) []align(1) T {
+        const bytes = self.getField(id).?;
+        var offset = readOffset(bytes);
+
+        const len = readOffset(bytes + offset);
+        offset += @sizeOf(Offset);
+
+        if (comptime !isScalar(T)) @compileError("can only readFieldVectorSlice on scalars");
+
+        const data = (bytes + offset)[0 .. @sizeOf(T) * len];
+        return std.mem.bytesAsSlice(T, data);
+    }
 };
 
 test "isScalar" {
@@ -108,6 +130,7 @@ test "isScalar" {
     };
     try testing.expectEqual(true, Table.isScalar(u16));
     try testing.expectEqual(true, Table.isScalar(Scalar));
+    try testing.expectEqual(true, Table.isScalar(void));
     const NotScalar = struct { flatbuffer: Table };
     try testing.expectEqual(false, Table.isScalar(NotScalar));
     try testing.expectEqual(false, Table.isScalar([]u8));
