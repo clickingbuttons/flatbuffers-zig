@@ -1,6 +1,8 @@
-// Handwritten to match codegen against.
+// Handwritten. Codegen should match exactly.
+const std = @import("std");
 const flatbuffers = @import("flatbuffers-zig");
-const std = std;
+const Builder = flatbuffers.Builder;
+const Table = flatbuffers.Table;
 
 pub const Color = enum(u8) {
     red = 0,
@@ -24,10 +26,10 @@ pub const Weapon = struct {
 
     pub const Self = @This();
 
-    pub fn init(packed_: PackedWeapon) Self {
+    pub fn init(packed_: PackedWeapon) !Self {
         return .{
-            .name = packed_.name(),
-            .damage = packed_.damage(),
+            .name = try packed_.name(),
+            .damage = try packed_.damage(),
         };
     }
 
@@ -41,24 +43,20 @@ pub const Weapon = struct {
 };
 
 pub const PackedWeapon = struct {
-    flatbuffer: flatbuffers.Table,
+    table: Table,
 
     pub const Self = @This();
 
-    pub fn initTable(table_bytes: []u8) Self {
-        return .{ .flatbuffer = .{ .table = @ptrCast([*]u8, table_bytes) } };
+    pub fn init(size_prefixed_bytes: []u8) Self {
+        return .{ .table = Table.init(size_prefixed_bytes) };
     }
 
-    pub fn init(root_bytes: []u8) Self {
-        return Self.initTable(root_bytes[flatbuffers.Table.readVOffset(root_bytes)..]);
+    pub fn name(self: Self) ![:0]u8 {
+        return self.table.readField([:0]u8, 0);
     }
 
-    pub fn name(self: Self) [:0]u8 {
-        return self.flatbuffer.readField([:0]u8, 0);
-    }
-
-    pub fn damage(self: Self) i16 {
-        return self.flatbuffer.readField(i16, 1);
+    pub fn damage(self: Self) !i16 {
+        return self.table.readField(i16, 1);
     }
 };
 
@@ -69,13 +67,13 @@ pub const Equipment = union(enum) {
     pub const Tag = std.meta.Tag(@This());
     pub const Self = @This();
 
-    pub fn init(packed_: PackedEquipment) Self {
+    pub fn init(packed_: PackedEquipment) !Self {
         switch (packed_) {
             inline else => |v, t| {
                 var result = @unionInit(Self, @tagName(t), undefined);
                 const field = &@field(result, @tagName(t));
                 const Field = @TypeOf(field.*);
-                field.* = if (comptime flatbuffers.Table.isScalar(Field)) v else Field.init(v);
+                field.* = if (comptime Table.isScalar(Field)) v else try Field.init(v);
                 return result;
             },
         }
@@ -128,27 +126,26 @@ pub const Monster = struct {
 
     pub fn init(allocator: std.mem.Allocator, packed_: PackedMonster) !Self {
         return Monster{
-            .pos = packed_.pos(),
-            .mana = packed_.mana(),
-            .hp = packed_.hp(),
-            .name = packed_.name(),
-            .inventory = packed_.inventory(),
-            .color = packed_.color(),
+            .pos = try packed_.pos(),
+            .mana = try packed_.mana(),
+            .hp = try packed_.hp(),
+            .name = try packed_.name(),
+            .inventory = try packed_.inventory(),
+            .color = try packed_.color(),
             .weapons = brk: {
-                var res = try allocator.alloc(Weapon, packed_.weaponsLen());
-                for (res, 0..) |*r, i| {
-                    r.* = Weapon.init(packed_.weapons(@intCast(u32, i)));
-                }
+                var res = try allocator.alloc(Weapon, try packed_.weaponsLen());
+                errdefer allocator.free(res);
+                for (res, 0..) |*r, i| r.* = try Weapon.init(try packed_.weapons(@intCast(u32, i)));
                 break :brk res;
             },
-            .equipped = Equipment.init(packed_.equipped()),
+            .equipped = try Equipment.init(try packed_.equipped()),
             .path = brk: {
-                const path = packed_.path();
+                const path = try packed_.path();
                 var res = try allocator.alloc(Vec3, path.len);
                 for (0..path.len) |i| res[i] = path[i];
                 break :brk res;
             },
-            .rotation = packed_.rotation(),
+            .rotation = try packed_.rotation(),
         };
     }
 
@@ -190,68 +187,64 @@ pub const Monster = struct {
 };
 
 pub const PackedMonster = struct {
-    flatbuffer: flatbuffers.Table,
+    table: Table,
 
     pub const Self = @This();
 
-    pub fn initTable(table_bytes: []u8) Self {
-        return .{ .flatbuffer = .{ .table = @ptrCast([*]u8, table_bytes) } };
+    pub fn init(size_prefixed_bytes: []u8) !Self {
+        return .{ .table = try Table.init(size_prefixed_bytes) };
     }
 
-    pub fn init(root_bytes: []u8) Self {
-        return Self.initTable(root_bytes[flatbuffers.Table.readVOffset(root_bytes)..]);
+    pub fn pos(self: Self) !Vec3 {
+        return self.table.readField(Vec3, 0);
     }
 
-    pub fn pos(self: Self) Vec3 {
-        return self.flatbuffer.readField(Vec3, 0);
+    pub fn mana(self: Self) !i16 {
+        return self.table.readFieldWithDefault(i16, 1, 150);
     }
 
-    pub fn mana(self: Self) i16 {
-        return self.flatbuffer.readFieldWithDefault(i16, 1, 150);
+    pub fn hp(self: Self) !i16 {
+        return self.table.readFieldWithDefault(i16, 2, 100);
     }
 
-    pub fn hp(self: Self) i16 {
-        return self.flatbuffer.readFieldWithDefault(i16, 2, 100);
+    pub fn name(self: Self) ![:0]u8 {
+        return self.table.readField([:0]u8, 3);
     }
 
-    pub fn name(self: Self) [:0]u8 {
-        return self.flatbuffer.readField([:0]u8, 3);
+    pub fn inventory(self: Self) ![]u8 {
+        return self.table.readField([]u8, 5);
     }
 
-    pub fn inventory(self: Self) []u8 {
-        return self.flatbuffer.readField([]u8, 5);
+    pub fn color(self: Self) !Color {
+        return self.table.readFieldWithDefault(Color, 6, .blue);
     }
 
-    pub fn color(self: Self) Color {
-        return self.flatbuffer.readFieldWithDefault(Color, 6, .blue);
+    pub fn weaponsLen(self: Self) !u32 {
+        return self.table.readFieldVectorLen(7);
+    }
+    pub fn weapons(self: Self, i: u32) !PackedWeapon {
+        return self.table.readFieldVectorItem(PackedWeapon, 7, i);
     }
 
-    pub fn weaponsLen(self: Self) u32 {
-        return self.flatbuffer.readFieldVectorLen(7);
+    pub fn equippedTag(self: Self) !PackedEquipment.Tag {
+        return self.table.readFieldWithDefault(PackedEquipment.Tag, 8, .none);
     }
-    pub fn weapons(self: Self, i: u32) PackedWeapon {
-        return self.flatbuffer.readFieldVectorItem(PackedWeapon, 7, i);
-    }
-
-    pub fn equippedTag(self: Self) PackedEquipment.Tag {
-        return self.flatbuffer.readFieldWithDefault(PackedEquipment.Tag, 8, .none);
-    }
-    pub fn equipped(self: Self) PackedEquipment {
-        return switch (self.equippedTag()) {
+    pub fn equipped(self: Self) !PackedEquipment {
+        return switch (try self.equippedTag()) {
             inline else => |t| {
                 var result = @unionInit(PackedEquipment, @tagName(t), undefined);
                 const field = &@field(result, @tagName(t));
-                field.* = self.flatbuffer.readField(@TypeOf(field.*), 9);
+                field.* = try self.table.readField(@TypeOf(field.*), 9);
                 return result;
             },
         };
     }
 
-    pub fn path(self: Self) []align(1) Vec3 {
-        return self.flatbuffer.readFieldVectorSlice(Vec3, 10);
+    pub fn path(self: Self) ![]align(1) Vec3 {
+        return self.table.readField([]align(1) Vec3, 10);
     }
 
-    pub fn rotation(self: Self) Vec4 {
-        return self.flatbuffer.readField(Vec4, 11);
+    pub fn rotation(self: Self) !Vec4 {
+        return self.table.readField(Vec4, 11);
     }
 };

@@ -25,7 +25,7 @@ table Monster {
   weapons:[Weapon];
   equipped:Equipment;
   path:[Vec3];
-  rotation:Vec4,
+  rotation:Vec4;
 }
 
 table Weapon {

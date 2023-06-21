@@ -378,7 +378,7 @@ test "build monster" {
         44, 0, 0, 0, // field 10 offset from here (path)
         132, 0, 0, 0, // field 9 offset from here (equipment value)
         0, 0, 0, @enumToInt(Equipment.weapon), // field 8 (equipment type)
-        60, 0, 0, 0, // field 7 (weapons)
+        60, 0, 0, 0, // field 7 offset from here (weapons)
         0, 0, 0, @enumToInt(Color.green), // field 6 (color)
         64, 0, 0, 0, // field 5 offset from here (inventory)
         68, 0, 0, 0, // field 3 offset from here (name)

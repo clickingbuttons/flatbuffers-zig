@@ -1,6 +1,6 @@
 - [x] arrays
 - [x] packing/unpacking
-- [ ] safety
+- [x] safety
 - codegen
 	- generate .bfbs (make flatc fork)
 	- handwrite reflection.zig
