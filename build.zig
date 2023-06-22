@@ -2,7 +2,7 @@ const std = @import("std");
 
 pub const name = "flatbuffers-zig";
 
-fn buildLib(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mode) void {
+fn buildLib(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mode) *std.build.Module {
     const module = b.addModule(name, .{
         .source_file = .{ .path = "src/lib.zig" },
         .dependencies = &.{},
@@ -34,9 +34,11 @@ fn buildLib(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mo
     const example_test_step = b.step("example", "Run example tests");
     const run_example_tests = b.addRunArtifact(example_tests);
     example_test_step.dependOn(&run_example_tests.step);
+
+    return module;
 }
 
-fn buildExe(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mode) void {
+fn buildExe(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mode, module: *std.Build.Module) void {
     const flatbuffers_dep = b.dependency("flatbuffers", .{
         .target = target,
         .optimize = optimize,
@@ -57,6 +59,7 @@ fn buildExe(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mo
     });
     exe.step.dependOn(&flatc.step);
     exe.addModule("clap", clap);
+    exe.addModule("flatbuffers-zig", module);
 
     const build_options = b.addOptions();
     build_options.addOptionArtifact("flatc_exe_path", flatc);
@@ -73,6 +76,6 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    buildLib(b, target, optimize);
-    buildExe(b, target, optimize);
+    const module = buildLib(b, target, optimize);
+    buildExe(b, target, optimize, module);
 }

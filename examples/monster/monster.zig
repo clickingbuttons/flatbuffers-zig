@@ -24,7 +24,7 @@ pub const Weapon = struct {
     name: []const u8,
     damage: i16,
 
-    pub const Self = @This();
+    const Self = @This();
 
     pub fn init(packed_: PackedWeapon) !Self {
         return .{
@@ -37,7 +37,7 @@ pub const Weapon = struct {
         const field_offsets = .{ .name = try builder.prependString(self.name) };
         try builder.startTable();
         try builder.appendTableFieldOffset(field_offsets.name); // field 0
-        try builder.appendTableField(?i16, self.damage); // field 1
+        try builder.appendTableField(i16, self.damage); // field 1
         return try builder.endTable();
     }
 };
@@ -45,14 +45,14 @@ pub const Weapon = struct {
 pub const PackedWeapon = struct {
     table: Table,
 
-    pub const Self = @This();
+    const Self = @This();
 
     pub fn init(size_prefixed_bytes: []u8) Self {
         return .{ .table = Table.init(size_prefixed_bytes) };
     }
 
-    pub fn name(self: Self) ![:0]u8 {
-        return self.table.readField([:0]u8, 0);
+    pub fn name(self: Self) ![:0]const u8 {
+        return self.table.readField([:0]const u8, 0);
     }
 
     pub fn damage(self: Self) !i16 {
@@ -65,7 +65,7 @@ pub const Equipment = union(enum) {
     weapon: Weapon,
 
     pub const Tag = std.meta.Tag(@This());
-    pub const Self = @This();
+    const Self = @This();
 
     pub fn init(packed_: PackedEquipment) !Self {
         switch (packed_) {
@@ -115,14 +115,14 @@ pub const Monster = struct {
     mana: i16 = 150,
     hp: i16 = 100,
     name: []const u8,
-    inventory: []u8,
+    inventory: []const u8,
     color: Color = .blue,
     weapons: []Weapon,
     equipped: Equipment,
     path: []Vec3,
     rotation: Vec4,
 
-    pub const Self = @This();
+    const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, packed_: PackedMonster) !Self {
         return Monster{
@@ -189,7 +189,7 @@ pub const Monster = struct {
 pub const PackedMonster = struct {
     table: Table,
 
-    pub const Self = @This();
+    const Self = @This();
 
     pub fn init(size_prefixed_bytes: []u8) !Self {
         return .{ .table = try Table.init(size_prefixed_bytes) };
@@ -207,12 +207,12 @@ pub const PackedMonster = struct {
         return self.table.readFieldWithDefault(i16, 2, 100);
     }
 
-    pub fn name(self: Self) ![:0]u8 {
-        return self.table.readField([:0]u8, 3);
+    pub fn name(self: Self) ![:0]const u8 {
+        return self.table.readField([:0]const u8, 3);
     }
 
-    pub fn inventory(self: Self) ![]u8 {
-        return self.table.readField([]u8, 5);
+    pub fn inventory(self: Self) ![]const u8 {
+        return self.table.readField([]const u8, 5);
     }
 
     pub fn color(self: Self) !Color {
@@ -222,8 +222,8 @@ pub const PackedMonster = struct {
     pub fn weaponsLen(self: Self) !u32 {
         return self.table.readFieldVectorLen(7);
     }
-    pub fn weapons(self: Self, i: u32) !PackedWeapon {
-        return self.table.readFieldVectorItem(PackedWeapon, 7, i);
+    pub fn weapons(self: Self, index: u32) !PackedWeapon {
+        return self.table.readFieldVectorItem(PackedWeapon, 7, index);
     }
 
     pub fn equippedTag(self: Self) !PackedEquipment.Tag {

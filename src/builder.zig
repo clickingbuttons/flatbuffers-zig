@@ -15,7 +15,7 @@ pub const Builder = struct {
     buffer: BackwardsBuffer,
     vtable: VTable,
     table_start: Offset = 0,
-    min_alignment: Offset = 1,
+    min_alignment: usize = 1,
     nested: bool = false,
 
     const Self = @This();
@@ -33,13 +33,17 @@ pub const Builder = struct {
         return @intCast(Offset, self.buffer.data.len);
     }
 
-    fn prep(self: *Self, comptime T: type, n_bytes_after: usize) !void {
-        const size = @sizeOf(T);
+    fn prepAdvanced(self: *Self, size: usize, n_bytes_after: usize) !void {
         if (size > self.min_alignment) self.min_alignment = size;
 
         const buf_size = self.buffer.data.len + n_bytes_after;
         const align_size = (~@intCast(i64, buf_size) + 1) & (@intCast(i64, size) - 1);
         try self.buffer.fill(@intCast(usize, align_size), 0);
+    }
+
+    fn prep(self: *Self, comptime T: type, n_bytes_after: usize) !void {
+        const size = @sizeOf(T);
+        try self.prepAdvanced(size, n_bytes_after);
     }
 
     pub fn prepend(self: *Self, value: anytype) !void {
@@ -140,7 +144,10 @@ pub const Builder = struct {
         return try self.writeVTable();
     }
 
-    pub fn toOwnedSlice(self: *Self) []u8 {
+    pub fn finish(self: *Self, root: Offset) ![]u8 {
+        try self.prepAdvanced(self.min_alignment, @sizeOf(Offset));
+        try self.prependOffset(root);
+
         self.vtable.deinit();
         return self.buffer.data;
     }
@@ -294,6 +301,36 @@ test "prepend object with vector" {
     }, builder.buffer.data);
 }
 
+test "prepend object with vector of string" {
+    var builder = Builder.init(testing.allocator);
+    defer builder.deinit();
+
+    const s1 = try builder.prependString("s1");
+    const s2 = try builder.prependString("s2");
+    const vec_offset = try builder.prependOffsets(@constCast(&[_]Offset{ s1, s2 }));
+
+    try builder.startTable();
+    try builder.appendTableFieldOffset(vec_offset); // field 0
+    _ = try builder.endTable();
+    try testing.expectEqualSlices(u8, &[_]u8{
+        6, 0, // vtable len
+        8, 0, // table len
+        4, 0, // offset to field 0 from vtable start (vector)
+        // vtable start
+        6, 0, 0, 0, // negative offset to start of vtable from here
+        4, 0, 0, 0, // offset to field 0 from here
+        // table start
+        2, 0, 0, 0, // field 0 len
+        16, 0, 0, 0, // field 0 item 0 offset from here
+        4, 0, 0, 0, // field 0 item 1 offset from here
+        2, 0, 0, 0, // "s2".len
+        's', '2', 0, 0, // s2
+        2, 0, 0, 0, // "s1".len
+        's', '1', 0, 0, // s1
+        // data
+    }, builder.buffer.data);
+}
+
 const Color = enum(u8) {
     red = 0,
     green,
@@ -344,9 +381,9 @@ pub fn exampleMonster(allocator: Allocator) ![]u8 {
     try builder.appendTableFieldOffset(weapon0); // field 9 (equipment value)
     try builder.appendTableFieldOffset(path); // field 10 (path)
     try builder.appendTableField(Vec4, .{ .v = .{ 1, 2, 3, 4 } }); // field 11 (rotation)
-    _ = try builder.endTable();
+    const root = try builder.endTable();
 
-    return @constCast(builder.toOwnedSlice());
+    return builder.finish(root);
 }
 
 test "build monster" {
@@ -354,6 +391,11 @@ test "build monster" {
     const bytes = try exampleMonster(testing.allocator);
     defer testing.allocator.free(bytes);
     try testing.expectEqualSlices(u8, &[_]u8{
+        44, 0, 0, 0, // offset to root table
+        0, 0, 0, 0, // padding
+        0, 0, 0, 0, // padding
+        0, 0, 0, 0, // padding
+        // header start
         28, 0, // vtable len
         68, 0, // table len
         56, 0, // offset to field  0 from vtable start (pos)

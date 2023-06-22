@@ -1,6 +1,7 @@
 const std = @import("std");
 const clap = @import("clap");
 const build_options = @import("build_options");
+const codegen = @import("./codegen/lib.zig");
 
 const Allocator = std.mem.Allocator;
 pub const Error = error{
@@ -41,7 +42,7 @@ pub fn bfbs(allocator: Allocator, include: []const u8, fname: []const u8) ![]con
     defer file.close();
     const res = try file.readToEndAlloc(allocator, std.math.maxInt(u32));
 
-    try std.fs.cwd().deleteFile(bfbs_fname);
+    // try std.fs.cwd().deleteFile(bfbs_fname);
     return res;
 }
 
@@ -51,31 +52,34 @@ fn fatal(msg: []const u8) []const u8 {
     unreachable;
 }
 
-fn codegen(input_path: []const u8, output_path: []const u8) !void {
+fn walk(opts: codegen.Options) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var dir = try std.fs.cwd().openIterableDir(input_path, .{});
+    var dir = try std.fs.cwd().openIterableDir(opts.input_dir, .{});
     defer dir.close();
 
-    var walk = try dir.walk(allocator);
-    while (try walk.next()) |d| {
+    var walker = try dir.walk(allocator);
+    while (try walker.next()) |d| {
         if (!std.mem.endsWith(u8, d.path, ".fbs")) continue;
 
-        const full_path = try std.fmt.allocPrint(allocator, "{s}{c}{s}", .{ input_path, std.fs.path.sep, d.path });
+        const full_path = try std.fmt.allocPrint(allocator, "{s}{c}{s}", .{ opts.input_dir, std.fs.path.sep, d.path });
         defer allocator.free(full_path);
-        std.debug.print("{s}\n", .{full_path});
-        const genned_bytes = try bfbs(allocator, input_path, full_path);
+
+        const genned_bytes = try bfbs(allocator, opts.input_dir, full_path);
+        defer allocator.free(genned_bytes);
         std.debug.print("genned {d} bytes\n", .{genned_bytes.len});
-        _ = output_path;
+
+        try codegen.codegen(allocator, full_path, genned_bytes, opts);
     }
 }
 
 pub fn main() !void {
     const params = comptime clap.parseParamsComptime(
-        \\-h, --help               Display this help and exit
-        \\-o, --output-path <str>  Code generation output path
-        \\-i, --input-path <str>   Directory with .fbs files to generate code for
+        \\-h, --help             Display this help and exit
+        \\-o, --output-dir <str> Code generation output path
+        \\-i, --input-dir <str>  Directory with .fbs files to generate code for
+        \\-e, --extension <str>  Extension for output files (default .zig)
         \\
     );
     var diag = clap.Diagnostic{};
@@ -87,10 +91,15 @@ pub fn main() !void {
     };
     defer res.deinit();
 
-    const input_path = res.args.@"input-path" orelse fatal("Missing argument `--input-path`");
-    const output_path = res.args.@"output-path" orelse fatal("Missing argument `--output-path`");
+    const input_dir = res.args.@"input-dir" orelse fatal("Missing argument `--input-dir`");
+    const output_dir = res.args.@"output-dir" orelse fatal("Missing argument `--output-dir`");
+    const extension = res.args.extension orelse ".zig";
     if (res.args.help != 0)
         return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
 
-    try codegen(input_path, output_path);
+    try walk(.{
+        .extension = extension,
+        .input_dir = input_dir,
+        .output_dir = output_dir,
+    });
 }

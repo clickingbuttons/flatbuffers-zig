@@ -4,12 +4,13 @@ const types = @import("./types.zig");
 const testing = std.testing;
 const Offset = types.Offset;
 const VOffset = types.VOffset;
+const log = types.log;
 
 const Error = error{
     InvalidOffset,
-    InvalidVTableId,
     InvalidAlignment,
     InvalidIndex,
+    InvalidVTableIndex,
     PrematureEnd,
     PrematureVTableEnd,
     MissingField,
@@ -34,7 +35,7 @@ pub const Table = struct {
     const Self = @This();
 
     pub fn init(size_prefixed_bytes: []u8) !Self {
-        const offset = try readVOffset(size_prefixed_bytes);
+        const offset = try readOffset(size_prefixed_bytes);
         return .{ .flatbuffer = size_prefixed_bytes, .offset = offset };
     }
 
@@ -43,20 +44,62 @@ pub const Table = struct {
         return self.flatbuffer[offset .. offset + len];
     }
 
+    fn signedAdd(a: Offset, b: i32) Offset {
+        const signed = @bitCast(i32, a) + b;
+        return @bitCast(Offset, signed);
+    }
+
     fn readAt(self: Self, comptime T: type, offset_: Offset) !T {
-        const bytes = try self.checkedSlice(offset_, @sizeOf(T));
-        // std.debug.print("readAt {d}", .{offset_});
-        // for (bytes) |b| std.debug.print(" {d}", .{b});
-        // std.debug.print("\n", .{});
-        return std.mem.bytesToValue(T, bytes[0..@sizeOf(T)]);
+        var offset = offset_;
+        const Child = switch (@typeInfo(T)) {
+            .Optional => |o| o.child,
+            else => T,
+        };
+
+        if (comptime isScalar(Child)) {
+            const bytes = try self.checkedSlice(offset_, @sizeOf(Child));
+            const res = std.mem.bytesToValue(Child, bytes[0..@sizeOf(Child)]);
+            return res;
+        }
+
+        const soffset = try self.readAt(i32, offset);
+        offset = signedAdd(offset, soffset);
+        switch (@typeInfo(Child)) {
+            .Struct => return T{
+                .table = .{
+                    .flatbuffer = self.flatbuffer,
+                    .offset = offset,
+                },
+            },
+            .Pointer => |p| brk: {
+                if (p.size != .Slice) break :brk;
+
+                const len = try self.readAt(Offset, offset);
+                const bytes = try self.checkedSlice(offset + @sizeOf(Offset), len * @sizeOf(p.child));
+
+                if (p.sentinel) |s_ptr| { // Probably a string
+                    const s = @ptrCast(*align(1) const p.child, s_ptr).*;
+                    return @ptrCast([:s]p.child, bytes);
+                }
+                return std.mem.bytesAsSlice(p.child, bytes);
+            },
+            else => {},
+        }
+        @compileError(std.fmt.comptimePrint("invalid type {any}", .{T}));
+    }
+
+    fn readTableAt(self: Self, comptime T: type, offset: Offset) !T {
+        if (offset == 0) return if (@typeInfo(T) == .Optional) null else Error.MissingField;
+
+        return try self.readAt(T, offset + self.offset);
     }
 
     fn vtable(self: Self) ![]VOffset {
-        const vtable_offset = try self.readAt(Offset, self.offset);
-        const vtable_loc = self.offset - vtable_offset;
+        const vtable_offset = try self.readAt(i32, self.offset);
+        const vtable_loc = signedAdd(self.offset, -vtable_offset);
         const vtable_len = try readVOffset(try self.checkedSlice(vtable_loc, @sizeOf(VOffset)));
         if (vtable_len > self.flatbuffer.len) return Error.PrematureVTableEnd;
-        const bytes = try self.checkedSlice(vtable_loc, @sizeOf(VOffset) * vtable_len);
+        const bytes = try self.checkedSlice(vtable_loc, vtable_len);
         if (@ptrToInt(&self.flatbuffer[vtable_loc]) % @alignOf(VOffset) != 0) {
             return Error.InvalidAlignment;
         }
@@ -68,10 +111,12 @@ pub const Table = struct {
         return self.checkedSlice(self.offset, vtable_[1]);
     }
 
-    fn getFieldOffset(self: Self, id: VOffset) !Offset {
+    fn getFieldOffset(self: Self, id: VOffset) !?Offset {
         const vtable_ = try self.vtable();
         const index = id + 2;
-        if (index >= vtable_.len) return Error.InvalidVTableId;
+
+        // vtables that end with all default fields are cut short by `flatc`.
+        if (index >= vtable_.len) return null;
 
         return vtable_[index];
     }
@@ -84,47 +129,27 @@ pub const Table = struct {
         };
     }
 
-    pub fn readField(self: Self, comptime T: type, id: VOffset) !T {
-        const is_optional = @typeInfo(T) == .Optional;
-        const Child = switch (@typeInfo(T)) {
-            .Optional => |o| o.child,
-            else => T,
+    pub fn isSlice(comptime T: type) bool {
+        return switch (@typeInfo(T)) {
+            .Pointer => |p| p.Size == .Slice,
+            else => false,
         };
+    }
 
-        var offset = try self.getFieldOffset(id);
-        if (offset == 0) return if (is_optional) null else Error.MissingField;
-        offset += self.offset;
+    pub fn readField(self: Self, comptime T: type, id: VOffset) !T {
+        if (try self.getFieldOffset(id)) |offset| return self.readTableAt(T, offset);
+        if (comptime isScalar(T)) return 0;
 
-        if (comptime isScalar(Child)) return try self.readAt(Child, offset);
-
-        offset += try self.readAt(Offset, offset);
-        switch (@typeInfo(Child)) {
-            .Struct => return T{
-                .table = .{
-                    .flatbuffer = self.flatbuffer,
-                    .offset = offset,
-                },
-            },
-            .Pointer => |p| {
-                const len = try self.readAt(Offset, offset);
-                const bytes = try self.checkedSlice(offset + @sizeOf(Offset), len * @sizeOf(p.child));
-
-                if (p.sentinel) |s_ptr| { // Probably a string
-                    const s = @ptrCast(*align(1) const p.child, s_ptr).*;
-                    return @ptrCast([:s]p.child, bytes);
-                }
-                return std.mem.bytesAsSlice(p.child, bytes);
-            },
-            else => |t| @compileError(std.fmt.comptimePrint("invalid type {any}", .{t})),
-        }
+        return Error.InvalidVTableIndex;
     }
 
     pub fn readFieldWithDefault(self: Self, comptime T: type, id: VOffset, default: T) !T {
-        return if (try self.readField(?T, id)) |res| res else default;
+        const val = self.readField(?T, id) catch return default;
+        return if (val) |v| v else default;
     }
 
     pub fn readFieldVectorLen(self: Self, id: VOffset) !Offset {
-        var offset = try self.getFieldOffset(id);
+        var offset = (self.getFieldOffset(id) catch @as(?u32, 0)) orelse 0;
         if (offset == 0) return 0;
         offset += self.offset;
         offset += try self.readAt(Offset, offset);
@@ -132,25 +157,24 @@ pub const Table = struct {
         return try self.readAt(Offset, offset);
     }
 
-    pub fn readFieldVectorItem(self: Self, comptime T: type, id: VOffset, index: Offset) !T {
-        var offset = try self.getFieldOffset(id);
+    pub fn readFieldVectorItem(self: Self, comptime T: type, id: VOffset, index_: usize) !T {
+        var offset = (self.getFieldOffset(id) catch @as(?u32, 0)) orelse 0;
         if (offset == 0) return Error.MissingField;
         offset += self.offset;
         offset += try self.readAt(Offset, offset);
-
         const len = try self.readAt(Offset, offset);
+
+        const index = @intCast(Offset, index_);
         if (index >= len) return Error.InvalidIndex;
         offset += @sizeOf(Offset);
 
         if (comptime isScalar(T)) {
             offset += index * @sizeOf(T);
-            return try self.readAt(T, offset);
         } else {
             offset += index * @sizeOf(Offset);
-            offset += try self.readAt(Offset, offset);
-
-            return T{ .table = .{ .flatbuffer = self.flatbuffer, .offset = offset } };
         }
+
+        return self.readAt(T, offset);
     }
 };
 
