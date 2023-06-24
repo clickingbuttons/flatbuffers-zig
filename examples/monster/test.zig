@@ -1,6 +1,6 @@
 const std = @import("std");
 const monster_mod = @import("./monster.zig");
-const flatbuffers = @import("flatbuffers-zig");
+const flatbuffers = @import("flatbuffers");
 
 const testing = std.testing;
 const PackedMonster = monster_mod.PackedMonster;
@@ -35,7 +35,7 @@ const example_monster = Monster{
 };
 
 fn testPackedMonster(monster: PackedMonster) !void {
-    try testing.expectEqual(Vec3{ .x = 1, .y = 2, .z = 3 }, try monster.pos());
+    try testing.expectEqual(Vec3{ .x = 1, .y = 2, .z = 3 }, (try monster.pos()).?);
     try testing.expectEqual(@as(i16, 100), try monster.mana());
     try testing.expectEqual(@as(i16, 200), try monster.hp());
     try testing.expectEqualStrings(@as([:0]u8, @constCast(&"orc".*)), try monster.name());
@@ -48,7 +48,7 @@ fn testPackedMonster(monster: PackedMonster) !void {
     try testing.expectEqual(@as(i16, 21), try weapon0.damage());
     try testing.expectEqualStrings(@as([:0]u8, @constCast(&"axe".*)), try weapon1.name());
     try testing.expectEqual(@as(i16, 23), try weapon1.damage());
-    try testing.expectEqual(Equipment.weapon, try monster.equippedTag());
+    try testing.expectEqual(Equipment.weapon, try monster.equippedType());
     const equipped = (try monster.equipped()).weapon;
     try testing.expectEqualStrings(@as([:0]u8, @constCast(&"saw".*)), try equipped.name());
     try testing.expectEqual(@as(i16, 21), try equipped.damage());
@@ -56,7 +56,7 @@ fn testPackedMonster(monster: PackedMonster) !void {
     try testing.expectEqual(@as(usize, 2), path.len);
     try testing.expectEqual(Vec3{ .x = 1, .y = 2, .z = 3 }, path[0]);
     try testing.expectEqual(Vec3{ .x = 4, .y = 5, .z = 6 }, path[1]);
-    try testing.expectEqual(Vec4{ .v = .{ 1, 2, 3, 4 } }, try monster.rotation());
+    try testing.expectEqual(Vec4{ .v = .{ 1, 2, 3, 4 } }, (try monster.rotation()).?);
 }
 
 test "build monster and read" {
@@ -75,7 +75,7 @@ test "build monster and unpack" {
     const unpacked = try Monster.init(testing.allocator, monster);
     defer unpacked.deinit(testing.allocator);
 
-    try testing.expectEqual(Vec4{ .v = .{ 1, 2, 3, 4 } }, unpacked.rotation);
+    try testing.expectEqual(Vec4{ .v = .{ 1, 2, 3, 4 } }, unpacked.rotation.?);
     try testing.expectEqualStrings("saw", unpacked.weapons[0].name);
     try testing.expectEqualStrings("saw", unpacked.equipped.weapon.name);
 }

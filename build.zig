@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const name = "flatbuffers-zig";
+pub const name = "flatbuffers";
 
 fn buildLib(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mode) *std.build.Module {
     const module = b.addModule(name, .{
@@ -59,10 +59,12 @@ fn buildExe(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mo
     });
     exe.step.dependOn(&flatc.step);
     exe.addModule("clap", clap);
-    exe.addModule("flatbuffers-zig", module);
+    exe.addModule(name, module);
+    b.installArtifact(exe);
 
     const build_options = b.addOptions();
     build_options.addOptionArtifact("flatc_exe_path", flatc);
+    build_options.addOption([]const u8, "module_name", name);
     exe.addOptions("build_options", build_options);
 
     const run_cmd = b.addRunArtifact(exe);

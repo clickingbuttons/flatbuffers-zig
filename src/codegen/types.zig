@@ -14,10 +14,10 @@ pub const Options = struct {
     extension: []const u8,
     input_dir: []const u8,
     output_dir: []const u8,
+    module_name: []const u8,
 };
 
 pub const Prelude = struct {
-    bfbs_path: []const u8,
     filename_noext: []const u8,
     file_ident: []const u8,
 };

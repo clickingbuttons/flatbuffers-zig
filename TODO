@@ -3,8 +3,15 @@
 - [x] safety
 - [ ] codegen
 	- [x] generate .bfbs (make flatc fork)
-	- [ ] handwrite reflection.zig
+	- [x] handwrite reflection.zig
+	- [x] hook up
+	- [ ] bug squash
+		- [ ] add `=  default` to struct fields
+		- [ ] use readFieldWithDefault
+		- [ ] fix @import("lib name")
+		- [ ] don't create deinit if no fields make allocations
+		- [ ] don't pass allocator if no fields make allocations
 options:
-- [ ] casing
 - [ ] required
+- [ ] casing for function names
 - [ ] setters

@@ -1,6 +1,6 @@
 // Handwritten. Codegen should match exactly.
 const std = @import("std");
-const flatbuffers = @import("flatbuffers-zig");
+const flatbuffers = @import("flatbuffers");
 const Builder = flatbuffers.Builder;
 const Table = flatbuffers.Table;
 

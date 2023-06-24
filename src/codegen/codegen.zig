@@ -51,7 +51,7 @@ fn format(allocator: Allocator, fname: []const u8, code: [:0]const u8) ![]const 
             ast.renderError(err, buf.writer()) catch {};
             log.err("formatting {s}: {s}", .{ fname, buf.items });
         }
-        return code;
+        return try allocator.dupe(u8, code);
     }
 
     return try ast.render(allocator);
@@ -133,7 +133,6 @@ pub fn codegen(allocator: Allocator, bfbs_path: []const u8, bfbs_bytes: []const 
     log.debug("file_ident={s} n_enums={d} n_objs={d}", .{ file_ident, try schema.enumsLen(), try schema.objectsLen() });
 
     const prelude = types.Prelude{
-        .bfbs_path = bfbs_path,
         .filename_noext = no_ext,
         .file_ident = file_ident,
     };

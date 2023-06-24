@@ -16,7 +16,7 @@ fn ToType(comptime base_type: types.BaseType) type {
         .ulong => u64,
         .float => f32,
         .double => f64,
-        .string => []const u8,
+        .string => [:0]const u8,
         else => |t| {
             @compileError(std.fmt.comptimePrint("invalid base type {any}", .{t}));
         },
@@ -117,6 +117,19 @@ pub const Type = struct {
 
     pub fn isScalar(self: Self) bool {
         return isBaseScalar(self.base_type);
+    }
+
+    pub fn isIndirect(self: Self, schema: types.Schema) !bool {
+        return switch (self.base_type) {
+            .array, .vector, .obj => {
+                const child_ = try self.child(schema);
+                if (child_) |c| {
+                    if (!(try c.type_()).isScalar()) return !(try c.isStruct());
+                }
+                return false;
+            },
+            else => false,
+        };
     }
 
     pub fn child(self: Self, schema: types.Schema) !?Child {

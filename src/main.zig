@@ -76,10 +76,11 @@ fn walk(opts: codegen.Options) !void {
 
 pub fn main() !void {
     const params = comptime clap.parseParamsComptime(
-        \\-h, --help             Display this help and exit
-        \\-o, --output-dir <str> Code generation output path
-        \\-i, --input-dir <str>  Directory with .fbs files to generate code for
-        \\-e, --extension <str>  Extension for output files (default .zig)
+        \\-h, --help              Display this help and exit
+        \\-o, --output-dir <str>  Code generation output path
+        \\-i, --input-dir <str>   Directory with .fbs files to generate code for
+        \\-e, --extension <str>   Extension for output files (default .zig)
+        \\-m, --module-name <str> Name of flatbuffers module (default flatbuffers)
         \\
     );
     var diag = clap.Diagnostic{};
@@ -93,13 +94,15 @@ pub fn main() !void {
 
     const input_dir = res.args.@"input-dir" orelse fatal("Missing argument `--input-dir`");
     const output_dir = res.args.@"output-dir" orelse fatal("Missing argument `--output-dir`");
+    const module_name = res.args.@"module-name" orelse "flatbuffers";
     const extension = res.args.extension orelse ".zig";
     if (res.args.help != 0)
         return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
 
-    try walk(.{
+    try walk(codegen.Options{
         .extension = extension,
         .input_dir = input_dir,
         .output_dir = output_dir,
+        .module_name = module_name,
     });
 }

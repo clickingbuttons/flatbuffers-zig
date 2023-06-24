@@ -56,7 +56,7 @@ pub const Table = struct {
             else => T,
         };
 
-        if (comptime isScalar(Child)) {
+        if (comptime isPacked(Child)) {
             const bytes = try self.checkedSlice(offset_, @sizeOf(Child));
             const res = std.mem.bytesToValue(Child, bytes[0..@sizeOf(Child)]);
             return res;
@@ -121,10 +121,17 @@ pub const Table = struct {
         return vtable_[index];
     }
 
-    pub fn isScalar(comptime T: type) bool {
+    pub fn isPacked(comptime T: type) bool {
         return switch (@typeInfo(T)) {
             .Void, .Bool, .Int, .Float, .Array, .Enum => true,
-            .Struct => |s| s.layout == .Extern,
+            .Struct => |s| s.layout == .Extern or s.layout == .Packed,
+            else => false,
+        };
+    }
+
+    pub fn isScalar(comptime T: type) bool {
+        return switch (@typeInfo(T)) {
+            .Bool, .Int, .Float, .Array, .Enum => true,
             else => false,
         };
     }
@@ -137,15 +144,19 @@ pub const Table = struct {
     }
 
     pub fn readField(self: Self, comptime T: type, id: VOffset) !T {
+        if (T == void) return {};
         if (try self.getFieldOffset(id)) |offset| return self.readTableAt(T, offset);
-        if (comptime isScalar(T)) return 0;
 
-        return Error.InvalidVTableIndex;
+        return if (@typeInfo(T) == .Optional) null else Error.InvalidVTableIndex;
     }
 
     pub fn readFieldWithDefault(self: Self, comptime T: type, id: VOffset, default: T) !T {
         const val = self.readField(?T, id) catch return default;
         return if (val) |v| v else default;
+    }
+
+    pub fn readNullableField(self: Self, comptime T: type, id: VOffset) !T {
+        return self.readField(T, id) catch return null;
     }
 
     pub fn readFieldVectorLen(self: Self, id: VOffset) !Offset {
@@ -168,7 +179,7 @@ pub const Table = struct {
         if (index >= len) return Error.InvalidIndex;
         offset += @sizeOf(Offset);
 
-        if (comptime isScalar(T)) {
+        if (comptime isPacked(T)) {
             offset += index * @sizeOf(T);
         } else {
             offset += index * @sizeOf(Offset);
@@ -184,10 +195,10 @@ test "isScalar" {
         y: f32,
         z: f32,
     };
-    try testing.expectEqual(true, Table.isScalar(u16));
-    try testing.expectEqual(true, Table.isScalar(Scalar));
-    try testing.expectEqual(true, Table.isScalar(void));
+    try testing.expectEqual(true, Table.isPacked(u16));
+    try testing.expectEqual(true, Table.isPacked(Scalar));
+    try testing.expectEqual(true, Table.isPacked(void));
     const NotScalar = struct { flatbuffer: Table };
-    try testing.expectEqual(false, Table.isScalar(NotScalar));
-    try testing.expectEqual(false, Table.isScalar([]u8));
+    try testing.expectEqual(false, Table.isPacked(NotScalar));
+    try testing.expectEqual(false, Table.isPacked([]u8));
 }

@@ -83,6 +83,14 @@ pub const Builder = struct {
         return self.offset();
     }
 
+    pub fn prependVectorOffsets(self: *Self, comptime T: type, packable: []T) !Offset {
+        const allocator = self.buffer.allocator;
+        var offsets = try allocator.alloc(u32, packable.len);
+        defer allocator.free(offsets);
+        for (packable, 0..) |p, i| offsets[i] = try p.pack(self);
+        return self.prependOffsets(offsets);
+    }
+
     pub fn prependString(self: *Self, string: ?[]const u8) !Offset {
         if (string) |str| {
             try self.prep(Offset, str.len + 1);
