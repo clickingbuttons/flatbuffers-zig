@@ -37,6 +37,7 @@ pub const Weapon = struct {
         const field_offsets = .{
             .name = try builder.prependString(self.name),
         };
+
         try builder.startTable();
         try builder.appendTableFieldOffset(field_offsets.name); // field 0
         try builder.appendTableField(i16, self.damage); // field 1
@@ -115,6 +116,7 @@ pub const Monster = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, packed_: PackedMonster) !Self {
+        _ = try packed_.weaponsLen();
         return .{
             .pos = try packed_.pos(),
             .mana = try packed_.mana(),
@@ -122,20 +124,9 @@ pub const Monster = struct {
             .name = try packed_.name(),
             .inventory = try packed_.inventory(),
             .color = try packed_.color(),
-            .weapons = brk: {
-                var res = try allocator.alloc(Weapon, try packed_.weaponsLen());
-                errdefer allocator.free(res);
-                for (res, 0..) |*r, i| r.* = try Weapon.init(try packed_.weapons(@intCast(u32, i)));
-                break :brk res;
-            },
+            .weapons = try flatbuffers.unpackVector(allocator, Weapon, packed_, "weapons"),
             .equipped = try Equipment.init(try packed_.equipped()),
-            .path = brk: {
-                // Fix alignment
-                const path = try packed_.path();
-                var res = try allocator.alloc(Vec3, path.len);
-                for (0..path.len) |i| res[i] = path[i];
-                break :brk res;
-            },
+            .path = try flatbuffers.unpackArray(allocator, Vec3, try packed_.path()),
             .rotation = try packed_.rotation(),
         };
     }

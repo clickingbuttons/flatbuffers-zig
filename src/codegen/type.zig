@@ -120,16 +120,29 @@ pub const Type = struct {
     }
 
     pub fn isIndirect(self: Self, schema: types.Schema) !bool {
-        return switch (self.base_type) {
-            .array, .vector, .obj => {
+        switch (self.base_type) {
+            .array, .vector => {
                 const child_ = try self.child(schema);
                 if (child_) |c| {
                     if (!(try c.type_()).isScalar()) return !(try c.isStruct());
                 }
-                return false;
             },
-            else => false,
-        };
+            else => {},
+        }
+        return false;
+    }
+
+    pub fn isAllocated(self: Self, schema: types.Schema) !bool {
+        switch (self.base_type) {
+            .array, .vector => {
+                const child_ = try self.child(schema);
+                if (child_) |c| {
+                    if (!(try c.type_()).isScalar()) return true;
+                }
+            },
+            else => {},
+        }
+        return false;
     }
 
     pub fn child(self: Self, schema: types.Schema) !?Child {

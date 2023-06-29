@@ -15,7 +15,7 @@ pub const Monster = struct {
     name: [:0]const u8,
     inventory: []u8,
     color: Types.Color = @intToEnum(Types.Color, 2),
-    weapons: []Types.Weapon,
+    weapons: []Types.PackedWeapon,
     equipped: Types.Equipment,
     path: []Types.Vec3,
     rotation: ?Types.Vec4 = null,
@@ -24,20 +24,21 @@ pub const Monster = struct {
 
     pub fn init(allocator: std.mem.allocator, packed_: PackedMonster) !Self {
         return .{
-            .color = try packed_.color(),
-            .equipped = try packed_.equipped(),
-            .friendly = try packed_.friendly(),
-            .hp = try packed_.hp(),
-            .inventory = try packed_.inventory(),
-            .mana = try packed_.mana(),
-            .name = try packed_.name(),
-            .path = try packed_.path(),
             .pos = try packed_.pos(),
+            .mana = try packed_.mana(),
+            .hp = try packed_.hp(),
+            .name = try packed_.name(),
+            .inventory = try packed_.inventory(),
+            .color = try packed_.color(),
+            .weapons = try flatbuffers.unpackVector(allocator, Types.Weapon, packed_, "weapons"),
+            .equipped = try packed_.equipped(),
+            .path = try flatbuffers.unpackArray(allocator, Types.Vec3, try packed_.path()),
             .rotation = try packed_.rotation(),
-            .weapons = try packed_.weapons(),
         };
     }
+
     pub fn deinit(self: Self, allocator: std.mem.Allocator) !void {
+        allocator.free(self.path);
         allocator.free(self.weapons);
     }
 
@@ -76,16 +77,16 @@ pub const PackedMonster = struct {
         return .{ .table = try flatbuffers.Table.init(size_prefixed_bytes) };
     }
 
-    pub fn pos(self: Self) !?Types.PackedVec3 {
-        return self.table.readField(?Types.PackedVec3, 0);
+    pub fn pos(self: Self) !?Types.Vec3 {
+        return self.table.readField(?Types.Vec3, 0);
     }
 
     pub fn mana(self: Self) !i16 {
-        return self.table.readField(i16, 1);
+        return self.table.readFieldWithDefault(i16, 1, 150);
     }
 
     pub fn hp(self: Self) !i16 {
-        return self.table.readField(i16, 2);
+        return self.table.readFieldWithDefault(i16, 2, 100);
     }
 
     pub fn name(self: Self) ![:0]const u8 {
@@ -97,10 +98,10 @@ pub const PackedMonster = struct {
     }
 
     pub fn color(self: Self) !Types.Color {
-        return self.table.readField(Types.Color, 6);
+        return self.table.readFieldWithDefault(Types.Color, 6, @intToEnum(Types.Color, 2));
     }
 
-    pub fn weaponsLen(self: Self) !usize {
+    pub fn weaponsLen(self: Self) !u32 {
         return self.table.readFieldVectorLen(7);
     }
     pub fn weapons(self: Self, index: usize) !Types.PackedWeapon {
@@ -108,13 +109,13 @@ pub const PackedMonster = struct {
     }
 
     pub fn equippedType(self: Self) !Types.PackedEquipment.Tag {
-        return self.table.readField(Types.PackedEquipment.Tag, 8);
+        return self.table.readFieldWithDefault(Types.PackedEquipment.Tag, 8, @intToEnum(Types.PackedEquipment.Tag, 0));
     }
 
-    pub fn equipped(self: Self) !Types.PackedEquipment {
+    pub fn equipped(self: Self) !Types.Equipment {
         return switch (try self.equippedType()) {
             inline else => |t| {
-                var result = @unionInit(Types.PackedEquipment, @tagName(t), undefined);
+                var result = @unionInit(Types.Equipment, @tagName(t), undefined);
                 const field = &@field(result, @tagName(t));
                 field.* = try self.table.readField(@TypeOf(field.*), 9);
                 return result;
@@ -122,11 +123,11 @@ pub const PackedMonster = struct {
         };
     }
 
-    pub fn path(self: Self) ![]align(1) Types.PackedVec3 {
-        return self.table.readField([]align(1) Types.PackedVec3, 10);
+    pub fn path(self: Self) ![]align(1) Types.Vec3 {
+        return self.table.readField([]align(1) Types.Vec3, 10);
     }
 
-    pub fn rotation(self: Self) !?Types.PackedVec4 {
-        return self.table.readField(?Types.PackedVec4, 11);
+    pub fn rotation(self: Self) !?Types.Vec4 {
+        return self.table.readField(?Types.Vec4, 11);
     }
 };

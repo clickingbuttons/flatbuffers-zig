@@ -295,7 +295,7 @@ pub const CodeWriter = struct {
             },
         }
         try self.ident_map.put("std", try self.getIdentifier("std"));
-        try self.ident_map.put("flatbuffers", try self.getIdentifier("flatbuffers"));
+        try self.ident_map.put(self.opts.module_name, try self.getIdentifier(self.opts.module_name));
         try self.ident_map.put("Self", try self.getIdentifier("Self"));
         try self.ident_map.put("Tag", try self.getIdentifier("Tag"));
     }
@@ -355,7 +355,7 @@ pub const CodeWriter = struct {
     }
 
     // Caller owns returned slice.
-    fn sortedFields(self: *Self, object: types.Object) ![]types.Field {
+    fn sortedFields(self: Self, object: types.Object) ![]types.Field {
         var res = std.ArrayList(types.Field).init(self.allocator);
         for (0..try object.fieldsLen()) |i| try res.append(try object.fields(i));
 
@@ -375,11 +375,20 @@ pub const CodeWriter = struct {
             .{ .name = "self", .type = "Self" },
         };
         try self.writeFnSig(writer, getter_name, typename, &args);
-        try writer.print(
-            \\
-            \\    return {s}.table.readField({s}, {d});
-            \\}}
-        , .{ args[0].name, typename, try field.id() });
+        const default = try self.getDefault(field);
+        if (default.len > 0 and !std.mem.eql(u8, default, "null")) {
+            try writer.print(
+                \\
+                \\    return {s}.table.readFieldWithDefault({s}, {d}, {s});
+                \\}}
+            , .{ args[0].name, typename, try field.id(), default });
+        } else {
+            try writer.print(
+                \\
+                \\    return {s}.table.readField({s}, {d});
+                \\}}
+            , .{ args[0].name, typename, try field.id() });
+        }
     }
 
     fn writeObjectFieldVectorLenFn(
@@ -391,7 +400,7 @@ pub const CodeWriter = struct {
         var args = [_]Arg{
             .{ .name = "self", .type = "Self" },
         };
-        try self.writeFnSig(writer, len_getter_name, "usize", &args);
+        try self.writeFnSig(writer, len_getter_name, "u32", &args);
         try writer.print(
             \\
             \\    return {s}.table.readFieldVectorLen({d});
@@ -449,27 +458,26 @@ pub const CodeWriter = struct {
         writer: anytype,
         object: types.Object,
         comptime is_packed: bool,
+        is_struct: bool,
     ) !void {
         const fields = try self.sortedFields(object);
         defer self.allocator.free(fields);
 
         for (fields) |field| {
-            const ty = try field.type();
+            const ty = try Type.initFromField(field);
             if (try field.deprecated()) continue;
             const name = try self.getFieldName(try field.name());
-            const typename = try self.getType(ty, is_packed, try field.optional());
+            const is_indirect = try ty.isIndirect(self.schema);
+            const typename = try self.getType(try field.type(), is_indirect, try field.optional());
             try writeComment(writer, field, true);
             if (is_packed) {
                 const getter_name = try self.getFunctionName(name);
                 // const setter_name = try self.getPrefixedFunctionName("set", try field.name());
 
                 try writer.writeByte('\n');
-                switch (try ty.baseType()) {
+                switch (ty.base_type) {
                     .utype, .bool, .byte, .ubyte, .short, .ushort, .int, .uint, .long, .ulong, .float, .double, .obj, .array, .string => try self.writeObjectFieldScalarFns(writer, field, getter_name, typename),
                     .vector => {
-                        const nice_type = try Type.init(ty);
-                        const is_indirect = try nice_type.isIndirect(self.schema);
-
                         if (is_indirect) {
                             try self.writeObjectFieldVectorLenFn(writer, field);
                             try self.writeObjectFieldVectorFn(writer, field, getter_name, typename);
@@ -481,13 +489,15 @@ pub const CodeWriter = struct {
                     .@"union" => try self.writeObjectFieldUnionFn(writer, field, getter_name, typename),
                     else => {},
                 }
-            } else if (try ty.baseType() != .utype) {
+            } else if (ty.base_type != .utype) {
                 try writer.print(
                     \\
                     \\    {s}: {s}
                 , .{ name, typename });
-                const default = try self.getDefault(field);
-                if (default.len > 0) try writer.print("= {s}", .{default});
+                if (!is_struct) {
+                    const default = try self.getDefault(field);
+                    if (default.len > 0) try writer.print("= {s}", .{default});
+                }
 
                 try writer.writeByte(',');
             }
@@ -660,25 +670,65 @@ pub const CodeWriter = struct {
         self: *Self,
         writer: anytype,
         object: types.Object,
+        has_allocations: bool,
         packed_name: []const u8,
     ) !void {
         const self_ident = self.ident_map.get("Self").?;
-        var args = [_]Arg{
+
+        var args = std.ArrayList(Arg).init(self.allocator);
+        defer args.deinit();
+
+        if (has_allocations) try args.append(
             .{ .name = "allocator", .type = "std.mem.allocator" },
-            .{ .name = "packed_", .type = packed_name },
-        };
-        try self.writeFnSig(writer, "init", self_ident, &args);
+        );
+        try args.append(.{ .name = "packed_", .type = packed_name });
+
+        try self.writeFnSig(writer, "init", self_ident, args.items);
         try writer.writeAll("\nreturn .{");
-        for (0..try object.fieldsLen()) |i| {
-            const field = try object.fields(i);
-            if (try (try field.type()).baseType() == .utype) continue;
+
+        const fields = try self.sortedFields(object);
+        defer self.allocator.free(fields);
+        for (fields) |field| {
+            const nice_type = try Type.initFromField(field);
+            if (nice_type.base_type == .utype or (try field.deprecated())) continue;
             const name = try field.name();
             const field_name = try self.getFieldName(name);
+            const field_type = try self.getType(try field.type(), false, false);
             const field_getter = try self.getFunctionName(name);
-            try writer.print(
-                \\
-                \\    .{s} = try {s}.{s}(),
-            , .{ field_name, args[1].name, field_getter });
+            const arg_index: usize = if (has_allocations) 1 else 0;
+            if (try nice_type.isAllocated(self.schema)) {
+                const module_name = try self.putDeclaration(self.opts.module_name, self.opts.module_name);
+                if (try nice_type.isIndirect(self.schema)) {
+                    try writer.print(
+                        \\
+                        \\    .{s} = try {s}.unpackVector({s}, {s}, {s}, "{s}"),
+                    , .{
+                        field_name,
+                        module_name,
+                        args.items[0].name,
+                        field_type[2..],
+                        args.items[1].name,
+                        field_getter,
+                    });
+                } else {
+                    try writer.print(
+                        \\
+                        \\    .{s} = try {s}.unpackArray({s}, {s}, try {s}.{s}()),
+                    , .{
+                        field_name,
+                        module_name,
+                        args.items[0].name,
+                        field_type[2..],
+                        args.items[1].name,
+                        field_getter,
+                    });
+                }
+            } else {
+                try writer.print(
+                    \\
+                    \\    .{s} = try {s}.{s}(),
+                , .{ field_name, args.items[arg_index].name, field_getter });
+            }
         }
         try writer.writeAll(
             \\
@@ -720,8 +770,8 @@ pub const CodeWriter = struct {
         for (0..try object.fieldsLen()) |i| {
             const field = try object.fields(i);
             const nice_type = try Type.init(try field.type());
-            const is_indirect = try nice_type.isIndirect(self.schema);
-            if (is_indirect) try writer.print(
+            const is_allocated = try nice_type.isAllocated(self.schema);
+            if (is_allocated) try writer.print(
                 \\
                 \\{s}.free({s}.{s});
             , .{ args[1].name, args[0].name, try field.name() });
@@ -730,6 +780,20 @@ pub const CodeWriter = struct {
             \\
             \\}
         );
+    }
+
+    fn hasAllocations(self: Self, object: types.Object) !bool {
+        const fields = try self.sortedFields(object);
+        defer self.allocator.free(fields);
+
+        for (fields) |field| {
+            if (try field.deprecated()) continue;
+            const ty = try Type.initFromField(field);
+            if (try ty.child(self.schema)) |c| {
+                if (c == .object_) return true;
+            }
+        }
+        return false;
     }
 
     fn writeObject(
@@ -759,14 +823,14 @@ pub const CodeWriter = struct {
             , .{ packed_name, mod_decl, self_ident });
 
             try self.writePackedObjectInitFn(writer, mod_decl);
-            try self.writeObjectFields(writer, object, is_packed);
+            try self.writeObjectFields(writer, object, is_packed, is_struct);
         } else {
             try writer.print(
                 \\
                 \\
                 \\pub const {s} = {s}struct {{
             , .{ type_name, if (is_struct) "extern " else "" });
-            try self.writeObjectFields(writer, object, is_packed);
+            try self.writeObjectFields(writer, object, is_packed, is_struct);
             if (!is_struct) {
                 try writer.print(
                     \\
@@ -774,9 +838,10 @@ pub const CodeWriter = struct {
                     \\const {s} = @This();
                     \\
                 , .{self_ident});
-                try self.writeObjectInitFn(writer, object, packed_name);
+                const has_allocations = try self.hasAllocations(object);
+                try self.writeObjectInitFn(writer, object, has_allocations, packed_name);
                 try writer.writeByte('\n');
-                try self.writeObjectDeinitFn(writer, object);
+                if (has_allocations) try self.writeObjectDeinitFn(writer, object);
 
                 try self.writePackFn(writer, object);
             }

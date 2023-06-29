@@ -92,12 +92,13 @@ pub fn main() !void {
     };
     defer res.deinit();
 
+    if (res.args.help != 0)
+        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+
     const input_dir = res.args.@"input-dir" orelse fatal("Missing argument `--input-dir`");
     const output_dir = res.args.@"output-dir" orelse fatal("Missing argument `--output-dir`");
     const module_name = res.args.@"module-name" orelse "flatbuffers";
     const extension = res.args.extension orelse ".zig";
-    if (res.args.help != 0)
-        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
 
     try walk(codegen.Options{
         .extension = extension,

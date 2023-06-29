@@ -5,7 +5,6 @@
 //!
 
 const flatbuffers = @import("flatbuffers");
-const std = @import("std");
 
 pub const Weapon = struct {
     name: [:0]const u8,
@@ -13,13 +12,12 @@ pub const Weapon = struct {
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.allocator, packed_: PackedWeapon) !Self {
+    pub fn init(packed_: PackedWeapon) !Self {
         return .{
-            .damage = try packed_.damage(),
             .name = try packed_.name(),
+            .damage = try packed_.damage(),
         };
     }
-    pub fn deinit(self: Self, allocator: std.mem.Allocator) !void {}
 
     pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
         const field_offsets = .{
@@ -47,6 +45,6 @@ pub const PackedWeapon = struct {
     }
 
     pub fn damage(self: Self) !i16 {
-        return self.table.readField(i16, 1);
+        return self.table.readFieldWithDefault(i16, 1, 0);
     }
 };
