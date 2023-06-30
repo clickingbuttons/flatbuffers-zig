@@ -31,7 +31,7 @@ pub const ChildType = union(enum) {
         };
     }
 
-    pub fn @"type"(self: Self) !Type {
+    pub fn @"type"(self: Self) Type {
         return switch (self) {
             .scalar => |s| Type{
                 .base_type = s,
@@ -45,7 +45,7 @@ pub const ChildType = union(enum) {
         };
     }
 
-    pub fn isStruct(self: Self) !bool {
+    pub fn isStruct(self: Self) bool {
         return switch (self) {
             .object => |o| o.is_struct,
             else => false,
@@ -117,8 +117,7 @@ pub const Type = struct {
     pub fn isIndirect(self: Self, schema: Types.Schema) !bool {
         if (self.base_type == .vector) {
             if (try self.child(schema)) |c| {
-                const child_type: Type = try c.type();
-                if (!child_type.base_type.isScalar()) return c.isStruct();
+                if (!c.type().base_type.isScalar()) return !c.isStruct();
             }
         }
         return false;
@@ -127,8 +126,7 @@ pub const Type = struct {
     pub fn isAllocated(self: Self, schema: Types.Schema) !bool {
         if (self.base_type == .vector) {
             if (try self.child(schema)) |c| {
-                const child_type: Type = try c.type();
-                if (!child_type.base_type.isScalar()) return true;
+                if (!c.type().base_type.isScalar()) return true;
             }
         }
         return false;

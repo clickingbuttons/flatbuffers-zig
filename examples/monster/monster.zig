@@ -39,8 +39,8 @@ pub const Weapon = struct {
         };
 
         try builder.startTable();
-        try builder.appendTableFieldOffset(field_offsets.name); // field 0
-        try builder.appendTableField(i16, self.damage); // field 1
+        try builder.appendTableFieldOffset(field_offsets.name);
+        try builder.appendTableField(i16, self.damage);
         return try builder.endTable();
     }
 };
@@ -59,7 +59,7 @@ pub const PackedWeapon = struct {
     }
 
     pub fn damage(self: Self) !i16 {
-        return self.table.readField(i16, 1);
+        return self.table.readFieldWithDefault(i16, 1, 0);
     }
 };
 
@@ -124,7 +124,7 @@ pub const Monster = struct {
             .name = try packed_.name(),
             .inventory = try packed_.inventory(),
             .color = try packed_.color(),
-            .weapons = try flatbuffers.unpackVector(allocator, Weapon, packed_, "weapons"),
+            .weapons = try flatbuffers.unpackVector(allocator, Weapon, packed_, "weapons", false),
             .equipped = try Equipment.init(try packed_.equipped()),
             .path = try flatbuffers.unpackArray(allocator, Vec3, try packed_.path()),
             .rotation = try packed_.rotation(),
@@ -132,8 +132,8 @@ pub const Monster = struct {
     }
 
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
-        allocator.free(self.path);
         allocator.free(self.weapons);
+        allocator.free(self.path);
     }
 
     pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
@@ -146,18 +146,18 @@ pub const Monster = struct {
         };
 
         try builder.startTable();
-        try builder.appendTableField(?Vec3, self.pos); // field 0
-        try builder.appendTableField(i16, self.mana); // field 1
-        try builder.appendTableField(i16, self.hp); // field 2
-        try builder.appendTableFieldOffset(field_offsets.name); // field 3
-        try builder.appendTableFieldOffset(0); // field 4 (friendly, deprecated)
-        try builder.appendTableFieldOffset(field_offsets.inventory); // field 5
-        try builder.appendTableField(Color, self.color); // field 6
-        try builder.appendTableFieldOffset(field_offsets.weapons); // field 7
-        try builder.appendTableField(Equipment, self.equipped); // field 8
-        try builder.appendTableFieldOffset(field_offsets.equipped); // field 9
-        try builder.appendTableFieldOffset(field_offsets.path); // field 10
-        try builder.appendTableField(?Vec4, self.rotation); // field 11
+        try builder.appendTableField(?Vec3, self.pos);
+        try builder.appendTableField(i16, self.mana);
+        try builder.appendTableField(i16, self.hp);
+        try builder.appendTableFieldOffset(field_offsets.name);
+        try builder.appendTableFieldOffset(0);
+        try builder.appendTableFieldOffset(field_offsets.inventory);
+        try builder.appendTableField(Color, self.color);
+        try builder.appendTableFieldOffset(field_offsets.weapons);
+        try builder.appendTableField(Equipment, self.equipped);
+        try builder.appendTableFieldOffset(field_offsets.equipped);
+        try builder.appendTableFieldOffset(field_offsets.path);
+        try builder.appendTableField(?Vec4, self.rotation);
         return try builder.endTable();
     }
 };

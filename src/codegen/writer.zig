@@ -33,8 +33,15 @@ pub const CodeWriter = struct {
     schema: types.Schema,
     opts: types.Options,
     n_dirs: usize,
+    prelude: types.Prelude,
 
-    pub fn init(allocator: Allocator, schema: types.Schema, opts: types.Options, n_dirs: usize) Self {
+    pub fn init(
+        allocator: Allocator,
+        schema: types.Schema,
+        opts: types.Options,
+        n_dirs: usize,
+        prelude: types.Prelude,
+    ) Self {
         return .{
             .allocator = allocator,
             .import_declarations = ImportDeclarations.init(allocator),
@@ -43,6 +50,7 @@ pub const CodeWriter = struct {
             .schema = schema,
             .opts = opts,
             .n_dirs = n_dirs,
+            .prelude = prelude,
         };
     }
 
@@ -171,11 +179,11 @@ pub const CodeWriter = struct {
             },
             else => |t| {
                 if (try type_.child(self.schema)) |child| {
-                    const decl_name = try self.getTypeName(try self.getTmpName("types"), false);
+                    const decl_name = try self.getTmpName("types");
                     var mod_name = std.ArrayList(u8).init(self.allocator);
                     defer mod_name.deinit();
                     for (0..self.n_dirs) |_| try mod_name.appendSlice("../");
-                    try mod_name.appendSlice("lib fname");
+                    try mod_name.appendSlice("lib.zig");
                     _ = try self.putDeclaration(decl_name, mod_name.items);
 
                     const is_packed = (type_.base_type == .@"union" or type_.base_type == .obj) and type_.is_packed or type_.base_type == .utype;
@@ -691,16 +699,16 @@ pub const CodeWriter = struct {
         return false;
     }
 
+    // Caller owns returned string
     fn writeObject(
         self: *Self,
         writer: anytype,
         object: Object,
         comptime is_packed: bool,
-    ) !void {
+    ) ![]const u8 {
         // try writeComment(writer, object, true);
         const type_name = try self.getTypeName(object.name, false);
         const packed_name = try self.getTypeName(object.name, true);
-        if (is_packed and object.is_struct) return;
         const self_ident = self.ident_map.get("Self").?;
 
         if (is_packed) {
@@ -743,6 +751,7 @@ pub const CodeWriter = struct {
             \\
             \\};
         );
+        return try self.allocator.dupe(u8, if (is_packed) packed_name else type_name);
     }
 
     fn writeEnumFields(
@@ -813,15 +822,13 @@ pub const CodeWriter = struct {
         , .{ args[0].name, args[1].name, mod_name });
     }
 
+    // Caller owns returned string
     fn writeEnum(
         self: *Self,
         writer: anytype,
         enum_: Enum,
         comptime is_packed: bool,
-    ) !void {
-        if (!enum_.is_union and is_packed) return;
-
-        log.debug("enum_.name {s}\n", .{enum_.name});
+    ) ![]const u8 {
         const type_name = try self.getTypeName(enum_.name, false);
         const packed_name = try self.getTypeName(enum_.name, true);
         const declaration = if (is_packed) packed_name else type_name;
@@ -863,49 +870,51 @@ pub const CodeWriter = struct {
         }
 
         try writer.writeAll("\n};");
+
+        return try self.allocator.dupe(u8, if (is_packed) packed_name else type_name);
     }
 
-    pub fn write(self: *Self, writer: anytype, obj_or_enum: anytype) !void {
+    // Caller owns returned slice and its contents.
+    pub fn write(self: *Self, writer: anytype, obj_or_enum: anytype) ![][]const u8 {
+        var res = std.ArrayList([]const u8).init(self.allocator);
         try self.initIdentMap(obj_or_enum);
+
+        var body = std.ArrayList(u8).init(self.allocator);
+        defer body.deinit();
+        const body_writer = body.writer();
         if (@hasField(@TypeOf(obj_or_enum), "fields")) {
             std.sort.pdq(types.Field, obj_or_enum.fields, {}, Field.lessThan);
-            try self.writeObject(writer, obj_or_enum, false);
-            try self.writeObject(writer, obj_or_enum, true);
+            for (obj_or_enum.fields) |*field| field.type.is_optional = field.optional and !field.required;
+            try res.append(try self.writeObject(body_writer, obj_or_enum, false));
+            if (!obj_or_enum.is_struct) try res.append(try self.writeObject(body_writer, obj_or_enum, true));
         } else {
-            try self.writeEnum(writer, obj_or_enum, false);
-            try self.writeEnum(writer, obj_or_enum, true);
+            try res.append(try self.writeEnum(body_writer, obj_or_enum, false));
+            if (obj_or_enum.is_union) try res.append(try self.writeEnum(body_writer, obj_or_enum, true));
         }
-    }
 
-    fn isRootTable(self: Self, name: []const u8) bool {
-        const root_table = self.schema.rootTable() catch return false;
-        return std.mem.eql(u8, name, root_table.name() catch return false);
+        try self.writePrelude(writer);
+        try writer.writeAll(body.items);
+
+        return try res.toOwnedSlice();
     }
 
     pub fn writePrelude(
         self: *Self,
         writer: anytype,
-        prelude: types.Prelude,
-        name: []const u8,
     ) !void {
-        try writer.print(
-            \\//!
-            \\//! generated by flatc-zig
-            \\//! schema:     {s}.fbs
-            \\//! typename    {?s}
-            \\//!
-            \\
-        , .{ prelude.filename_noext, name });
-        try self.writeImportDeclarations(writer);
-    }
-
-    fn writeImportDeclarations(self: Self, writer: anytype) !void {
+        try writer.print("//! generated by flatc-zig from {s}.fbs\n", .{self.prelude.filename_noext});
         // Rely on index file. This can cause recursive deps for the root file, but zig handles that
         // without a problem.
-        try writer.writeByte('\n');
-        var iter = self.import_declarations.iterator();
-        while (iter.next()) |kv| {
-            try writer.print("\nconst {s} = @import(\"{s}\"); ", .{ kv.key_ptr.*, kv.value_ptr.* });
-        }
+        var keys = std.ArrayList([]const u8).init(self.allocator);
+        defer keys.deinit();
+
+        var iter = self.import_declarations.keyIterator();
+        while (iter.next()) |k| try keys.append(k.*);
+        std.sort.pdq([]const u8, keys.items, {}, util.strcmp);
+        for (keys.items) |k|
+            try writer.print("\nconst {s} = @import(\"{s}\"); ", .{
+                k,
+                self.import_declarations.get(k).?,
+            });
     }
 };

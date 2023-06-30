@@ -80,6 +80,9 @@ fn writeFiles(
         .object => schema.objects,
     };
 
+    const lib_fname = try getFilename(allocator, opts, "lib");
+    var lib_file = try createFile(lib_fname);
+
     for (object_or_enums) |obj| {
         const same_file = obj.declaration_file.len == 0 or std.mem.eql(u8, obj.declaration_file, prelude.file_ident);
         if (!same_file) continue;
@@ -89,11 +92,18 @@ fn writeFiles(
         log.debug("fname {s}", .{fname});
         const n_dirs = std.mem.count(u8, obj.name, ".");
 
-        var code_writer = CodeWriter.init(allocator, schema, opts, n_dirs);
+        var code_writer = CodeWriter.init(allocator, schema, opts, n_dirs, prelude);
         defer code_writer.deinit();
         var code = std.ArrayList(u8).init(allocator);
         defer code.deinit();
-        try code_writer.write(code.writer(), obj);
+        for (try code_writer.write(code.writer(), obj)) |l| {
+            const relative = try std.fs.path.relative(allocator, std.fs.path.dirname(lib_fname).?, fname);
+            defer allocator.free(relative);
+            try lib_file.writer().print(
+                \\pub const {0s} = @import("{1s}").{0s};
+                \\
+            , .{ l, relative });
+        }
 
         try writeFormattedCode(allocator, fname, try code.toOwnedSliceSentinel(0));
     }

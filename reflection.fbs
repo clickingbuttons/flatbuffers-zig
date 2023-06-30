@@ -4,8 +4,6 @@
 // This could be used to operate on unknown FlatBuffers at runtime.
 // It can even ... represent itself (!)
 
-namespace reflection;
-
 // These must correspond to the enum in idl.h.
 enum BaseType : byte {
     None,
