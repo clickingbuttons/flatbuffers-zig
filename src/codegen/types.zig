@@ -1,13 +1,14 @@
 const std = @import("std");
-const refl = @import("./reflection.zig");
+const refl = @import("./reflection/lib.zig");
 
-pub const Schema = refl.PackedSchema;
+pub const PackedSchema = refl.PackedSchema;
+pub const Schema = refl.Schema;
 pub const Enum = refl.Enum;
-pub const EnumVal = refl.PackedEnumVal;
-pub const Object = refl.PackedObject;
-pub const Field = refl.PackedField;
+pub const EnumVal = refl.EnumVal;
+pub const Object = refl.Object;
+pub const Field = refl.Field;
 pub const BaseType = refl.BaseType;
-pub const Type = refl.PackedType;
+pub const Type = refl.Type;
 pub const log = std.log.scoped(.flatbuffers);
 
 pub const Options = struct {

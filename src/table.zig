@@ -65,7 +65,7 @@ pub const Table = struct {
         const soffset = try self.readAt(i32, offset);
         offset = signedAdd(offset, soffset);
         switch (@typeInfo(Child)) {
-            .Struct => return T{
+            .Struct => return Child{
                 .table = .{
                     .flatbuffer = self.flatbuffer,
                     .offset = offset,

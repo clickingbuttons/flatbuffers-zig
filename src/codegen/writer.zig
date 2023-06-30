@@ -1,111 +1,20 @@
 const std = @import("std");
 const StringPool = @import("string_pool.zig").StringPool;
 const types = @import("types.zig");
-const Type = @import("./type.zig").Type;
+const util = @import("./util.zig");
+
+const Type = types.Type;
+const Field = types.Field;
+const Object = types.Object;
+const Enum = types.Enum;
 
 const Allocator = std.mem.Allocator;
 const log = types.log;
 
-pub const SchemaObj = union(enum) {
-    enum_: types.Enum,
-    object: types.Object,
-
-    const Self = @This();
-    pub const Tag = std.meta.Tag(Self);
-
-    pub fn declarationFile(self: Self) ![]const u8 {
-        return switch (self) {
-            inline else => |t| try t.declarationFile(),
-        };
-    }
-
-    pub fn name(self: Self) ![]const u8 {
-        return switch (self) {
-            inline else => |t| try t.name(),
-        };
-    }
-};
-
-const Arg = struct {
-    name: []const u8,
-    type: []const u8,
-};
-
-fn writeComment(writer: anytype, e: anytype, doc_comment: bool) !void {
-    const prefix = if (doc_comment) "///" else "//";
-    for (0..try e.documentationLen()) |i| try writer.print("\n{s}{s}", .{ prefix, try e.documentation(i) });
-}
-
-fn getDeclarationName(fname: []const u8) []const u8 {
-    const basename = std.fs.path.basename(fname);
-    const first_dot = std.mem.indexOfScalar(u8, basename, '.') orelse basename.len;
-    return basename[0..first_dot];
-}
-
-inline fn isWordBoundary(c: u8) bool {
-    return switch (c) {
-        '_', '-', ' ', '.' => true,
-        else => false,
-    };
-}
-
-fn changeCase(writer: anytype, input: []const u8, mode: enum { camel, title }) !void {
-    var capitalize_next = mode == .title;
-    for (input, 0..) |c, i| {
-        if (isWordBoundary(c)) {
-            capitalize_next = true;
-        } else {
-            try writer.writeByte(if (i == 0 and mode == .camel)
-                std.ascii.toLower(c)
-            else if (capitalize_next)
-                std.ascii.toUpper(c)
-            else
-                c);
-            capitalize_next = false;
-        }
-    }
-}
-
-fn toCamelCase(writer: anytype, input: []const u8) !void {
-    try changeCase(writer, input, .camel);
-}
-
-test "toCamelCase" {
-    var buf = std.ArrayList(u8).init(std.testing.allocator);
-    defer buf.deinit();
-
-    try toCamelCase(buf.writer(), "not_camel_case");
-    try std.testing.expectEqualStrings("notCamelCase", buf.items);
-
-    try buf.resize(0);
-    try toCamelCase(buf.writer(), "Not_Camel_Case");
-    try std.testing.expectEqualStrings("notCamelCase", buf.items);
-
-    try buf.resize(0);
-    try toCamelCase(buf.writer(), "Not Camel Case");
-    try std.testing.expectEqualStrings("notCamelCase", buf.items);
-}
-
-fn toTitleCase(writer: anytype, input: []const u8) !void {
-    try changeCase(writer, input, .title);
-}
-
-fn toSnakeCase(writer: anytype, input: []const u8) !void {
-    var last_upper = false;
-    for (input, 0..) |c, i| {
-        const is_upper = c >= 'A' and c <= 'Z';
-        if ((is_upper or isWordBoundary(c)) and i != 0 and !last_upper) try writer.writeByte('_');
-        last_upper = is_upper;
-        if (!isWordBoundary(c)) try writer.writeByte(std.ascii.toLower(c));
-    }
-}
-
-fn fieldLessThan(context: void, a: types.Field, b: types.Field) bool {
-    _ = context;
-    const a_id = a.id() catch 0;
-    const b_id = b.id() catch 0;
-    return a_id < b_id;
-}
+const Arg = util.Arg;
+const toCamelCase = util.toCamelCase;
+const toTitleCase = util.toTitleCase;
+const toSnakeCase = util.toSnakeCase;
 
 pub const CodeWriter = struct {
     const Self = @This();
@@ -141,6 +50,28 @@ pub const CodeWriter = struct {
         self.import_declarations.deinit();
         self.ident_map.deinit();
         self.string_pool.deinit();
+    }
+
+    fn initIdentMap(self: *Self, obj_or_enum: anytype) !void {
+        self.ident_map.clearRetainingCapacity();
+        const type_name = try self.getTypeName(obj_or_enum.name, false);
+        const packed_name = try self.getTypeName(obj_or_enum.name, true);
+        try self.ident_map.put(type_name, type_name);
+        try self.ident_map.put(packed_name, packed_name);
+        if (@hasField(@TypeOf(obj_or_enum), "fields")) {
+            for (obj_or_enum.fields) |field| {
+                const field_name = try self.getFieldName(field.name);
+                const getter_name = try self.getFunctionName(field.name);
+                const setter_name = try self.getPrefixedFunctionName("set", field.name);
+                try self.ident_map.put(field_name, field_name);
+                try self.ident_map.put(getter_name, getter_name);
+                try self.ident_map.put(setter_name, setter_name);
+            }
+        }
+        try self.ident_map.put("std", try self.getIdentifier("std"));
+        try self.ident_map.put(self.opts.module_name, try self.getIdentifier(self.opts.module_name));
+        try self.ident_map.put("Self", try self.getIdentifier("Self"));
+        try self.ident_map.put("Tag", try self.getIdentifier("Tag"));
     }
 
     // This struct owns returned string
@@ -233,7 +164,7 @@ pub const CodeWriter = struct {
                 };
                 const next_name = try self.getMaybeModuleTypeName(next_type);
                 if (t == .array) {
-                    return try std.fmt.allocPrint(self.allocator, "[{d}]{s}", .{ type_.fixed_len, next_name });
+                    return try std.fmt.allocPrint(self.allocator, "[{d}]{s}", .{ type_.fixed_length, next_name });
                 } else {
                     return try std.fmt.allocPrint(self.allocator, "[]{s}", .{next_name});
                 }
@@ -249,7 +180,7 @@ pub const CodeWriter = struct {
 
                     const is_packed = (type_.base_type == .@"union" or type_.base_type == .obj) and type_.is_packed or type_.base_type == .utype;
 
-                    const typename = try self.getTypeName(try child.name(), is_packed);
+                    const typename = try self.getTypeName(child.name(), is_packed);
                     return std.fmt.allocPrint(self.allocator, "{s}{s}.{s}{s}", .{
                         if (type_.is_optional and t != .@"union") "?" else "",
                         decl_name,
@@ -261,51 +192,14 @@ pub const CodeWriter = struct {
                     log.err("{s}", .{err});
                     return err;
                 } else {
-                    return try std.fmt.allocPrint(self.allocator, "{s}", .{type_.name()});
+                    return try std.fmt.allocPrint(self.allocator, "{s}", .{type_.base_type.name()});
                 }
             },
         }
-    }
-
-    fn initIdentMap(self: *Self, schema_obj: SchemaObj) !void {
-        self.ident_map.clearRetainingCapacity();
-        switch (schema_obj) {
-            .enum_ => |e| {
-                const name = try self.getTypeName(try e.name(), false);
-                const packed_name = try self.getTypeName(try e.name(), true);
-                try self.ident_map.put(name, name);
-                try self.ident_map.put(packed_name, packed_name);
-            },
-            .object => |o| {
-                // TODO: gather import declarations
-                const type_name = try self.getTypeName(try o.name(), false);
-                const packed_name = try self.getTypeName(try o.name(), true);
-                try self.ident_map.put(type_name, type_name);
-                try self.ident_map.put(packed_name, packed_name);
-                for (0..try o.fieldsLen()) |i| {
-                    const field = try o.fields(i);
-                    const name = try field.name();
-                    const field_name = try self.getFieldName(name);
-                    const getter_name = try self.getFunctionName(name);
-                    const setter_name = try self.getPrefixedFunctionName("set", name);
-                    try self.ident_map.put(field_name, field_name);
-                    try self.ident_map.put(getter_name, getter_name);
-                    try self.ident_map.put(setter_name, setter_name);
-                }
-            },
-        }
-        try self.ident_map.put("std", try self.getIdentifier("std"));
-        try self.ident_map.put(self.opts.module_name, try self.getIdentifier(self.opts.module_name));
-        try self.ident_map.put("Self", try self.getIdentifier("Self"));
-        try self.ident_map.put("Tag", try self.getIdentifier("Tag"));
     }
 
     // This struct owns returned string.
-    fn getType(self: *Self, type_: types.Type, is_packed: bool, is_optional: bool) ![]const u8 {
-        var ty = try Type.init(type_);
-        ty.is_packed = is_packed;
-        ty.is_optional = is_optional;
-
+    fn getType(self: *Self, ty: Type) ![]const u8 {
         const maybe_module_type_name = try self.getMaybeModuleTypeName(ty);
         defer self.allocator.free(maybe_module_type_name);
 
@@ -354,16 +248,6 @@ pub const CodeWriter = struct {
         try writer.print(") !{s} {{", .{return_type});
     }
 
-    // Caller owns returned slice.
-    fn sortedFields(self: Self, object: types.Object) ![]types.Field {
-        var res = std.ArrayList(types.Field).init(self.allocator);
-        for (0..try object.fieldsLen()) |i| try res.append(try object.fields(i));
-
-        std.sort.pdq(types.Field, res.items, {}, fieldLessThan);
-
-        return res.toOwnedSlice();
-    }
-
     fn writeObjectFieldScalarFns(
         self: *Self,
         writer: anytype,
@@ -381,13 +265,22 @@ pub const CodeWriter = struct {
                 \\
                 \\    return {s}.table.readFieldWithDefault({s}, {d}, {s});
                 \\}}
-            , .{ args[0].name, typename, try field.id(), default });
+            , .{
+                args[0].name,
+                typename,
+                field.id,
+                default,
+            });
         } else {
             try writer.print(
                 \\
                 \\    return {s}.table.readField({s}, {d});
                 \\}}
-            , .{ args[0].name, typename, try field.id() });
+            , .{
+                args[0].name,
+                typename,
+                field.id,
+            });
         }
     }
 
@@ -396,7 +289,7 @@ pub const CodeWriter = struct {
         writer: anytype,
         field: types.Field,
     ) !void {
-        const len_getter_name = try self.getPrefixedFunctionName(try field.name(), "len");
+        const len_getter_name = try self.getPrefixedFunctionName(field.name, "len");
         var args = [_]Arg{
             .{ .name = "self", .type = "Self" },
         };
@@ -405,7 +298,7 @@ pub const CodeWriter = struct {
             \\
             \\    return {s}.table.readFieldVectorLen({d});
             \\}}
-        , .{ args[0].name, try field.id() });
+        , .{ args[0].name, field.id });
     }
 
     fn writeObjectFieldUnionFn(
@@ -415,7 +308,7 @@ pub const CodeWriter = struct {
         getter_name: []const u8,
         typename: []const u8,
     ) !void {
-        const tag_getter_name = try self.getPrefixedFunctionName(try field.name(), "type");
+        const tag_getter_name = try self.getPrefixedFunctionName(field.name, "type");
         var args = [_]Arg{
             .{ .name = "self", .type = "Self" },
         };
@@ -431,7 +324,7 @@ pub const CodeWriter = struct {
             \\        }},
             \\    }};
             \\}}
-        , .{ args[0].name, tag_getter_name, typename, try field.id() });
+        , .{ args[0].name, tag_getter_name, typename, field.id });
     }
 
     fn writeObjectFieldVectorFn(
@@ -450,32 +343,32 @@ pub const CodeWriter = struct {
             \\
             \\    return {s}.table.readFieldVectorItem({s}, {d}, {s});
             \\}}
-        , .{ args[0].name, typename[2..], try field.id(), args[1].name });
+        , .{
+            args[0].name,
+            typename[2..],
+            field.id,
+            args[1].name,
+        });
     }
 
     fn writeObjectFields(
         self: *Self,
         writer: anytype,
-        object: types.Object,
+        object: Object,
         comptime is_packed: bool,
-        is_struct: bool,
     ) !void {
-        const fields = try self.sortedFields(object);
-        defer self.allocator.free(fields);
-
-        for (fields) |field| {
-            const ty = try Type.initFromField(field);
-            if (try field.deprecated()) continue;
-            const name = try self.getFieldName(try field.name());
-            const is_indirect = try ty.isIndirect(self.schema);
-            const typename = try self.getType(try field.type(), is_indirect, try field.optional());
-            try writeComment(writer, field, true);
+        for (object.fields) |field| {
+            if (field.deprecated) continue;
+            const name = try self.getFieldName(field.name);
+            const is_indirect = try field.type.isIndirect(self.schema);
+            const typename = try self.getType(field.type);
+            // try writeComment(writer, field, true);
             if (is_packed) {
                 const getter_name = try self.getFunctionName(name);
                 // const setter_name = try self.getPrefixedFunctionName("set", try field.name());
 
                 try writer.writeByte('\n');
-                switch (ty.base_type) {
+                switch (field.type.base_type) {
                     .utype, .bool, .byte, .ubyte, .short, .ushort, .int, .uint, .long, .ulong, .float, .double, .obj, .array, .string => try self.writeObjectFieldScalarFns(writer, field, getter_name, typename),
                     .vector => {
                         if (is_indirect) {
@@ -489,12 +382,12 @@ pub const CodeWriter = struct {
                     .@"union" => try self.writeObjectFieldUnionFn(writer, field, getter_name, typename),
                     else => {},
                 }
-            } else if (ty.base_type != .utype) {
+            } else if (field.type.base_type != .utype) {
                 try writer.print(
                     \\
                     \\    {s}: {s}
                 , .{ name, typename });
-                if (!is_struct) {
+                if (!object.is_struct) {
                     const default = try self.getDefault(field);
                     if (default.len > 0) try writer.print("= {s}", .{default});
                 }
@@ -506,16 +399,29 @@ pub const CodeWriter = struct {
 
     // Struct owns returned string.
     fn getDefault(self: *Self, field: types.Field) ![]const u8 {
-        const ty = try Type.initFromField(field);
+        const default_int = field.default_integer;
 
-        const res = switch (ty.base_type) {
-            .utype => try std.fmt.allocPrint(self.allocator, "@intToEnum({s}, {d})", .{ try self.getType(try field.type(), false, false), try field.defaultInteger() }),
-            .bool => try std.fmt.allocPrint(self.allocator, "{s}", .{if (try field.defaultInteger() == 0) "false" else "true"}),
+        const res = switch (field.type.base_type) {
+            .utype => try std.fmt.allocPrint(self.allocator, "@intToEnum({s}, {d})", .{
+                try self.getType(field.type),
+                default_int,
+            }),
+            .bool => try std.fmt.allocPrint(self.allocator, "{s}", .{
+                if (default_int == 0) "false" else "true",
+            }),
             .byte, .ubyte, .short, .ushort, .int, .uint, .long, .ulong =>
             // Check for an enum in disguise.
-            if (try ty.child(self.schema) != null) try std.fmt.allocPrint(self.allocator, "@intToEnum({s}, {d})", .{ try self.getType(try field.type(), false, false), try field.defaultInteger() }) else try std.fmt.allocPrint(self.allocator, "{d}", .{try field.defaultInteger()}),
+            if (try field.type.child(self.schema) != null) try std.fmt.allocPrint(
+                self.allocator,
+                "@intToEnum({s}, {d})",
+                .{ try self.getType(field.type), default_int },
+            ) else try std.fmt.allocPrint(
+                self.allocator,
+                "{d}",
+                .{default_int},
+            ),
             .float, .double => |t| brk: {
-                const default = try field.defaultReal();
+                const default = field.default_real;
                 const T = if (t == .float) "f32" else "f64";
                 if (std.math.isNan(default)) {
                     const std_mod = try self.putDeclaration("std", "std");
@@ -526,9 +432,9 @@ pub const CodeWriter = struct {
                     const sign = if (std.math.isNegativeInf(default)) "-" else "";
                     break :brk try std.fmt.allocPrint(self.allocator, "{s}{s}.math.inf({s})", .{ sign, std_mod, T });
                 }
-                break :brk try std.fmt.allocPrint(self.allocator, "{e}", .{try field.defaultReal()});
+                break :brk try std.fmt.allocPrint(self.allocator, "{e}", .{field.default_real});
             },
-            .obj => try std.fmt.allocPrint(self.allocator, "{s}", .{if (try field.optional()) "null" else ".{}"}),
+            .obj => try std.fmt.allocPrint(self.allocator, "{s}", .{if (field.optional) "null" else ".{}"}),
             .@"union", .array, .vector, .string => try std.fmt.allocPrint(self.allocator, "", .{}),
             else => |t| {
                 log.err("cannot get default for base type {any}", .{t});
@@ -548,11 +454,10 @@ pub const CodeWriter = struct {
         args: []Arg,
         offsets_name: []const u8,
     ) !void {
-        const field_name = try self.getFieldName(try field.name());
-        const ty = try Type.initFromField(field);
-        const ty_name = try self.getMaybeModuleTypeName(ty);
-        const is_indirect = try ty.isIndirect(self.schema);
-        const is_offset = switch (ty.base_type) {
+        const field_name = try self.getFieldName(field.name);
+        const ty_name = try self.getMaybeModuleTypeName(field.type);
+        const is_indirect = try field.type.isIndirect(self.schema);
+        const is_offset = switch (field.type.base_type) {
             .obj => is_indirect,
             .string, .vector, .@"union" => true,
             else => false,
@@ -561,7 +466,7 @@ pub const CodeWriter = struct {
         const self_name = args[0].name;
         const builder_name = args[1].name;
 
-        if (try field.deprecated()) {
+        if (field.deprecated) {
             try writer.print(
                 \\
                 \\    try {s}.appendTableFieldOffset(0);
@@ -571,7 +476,7 @@ pub const CodeWriter = struct {
                 \\
                 \\    try {s}.appendTableFieldOffset({s}.{s});
             , .{ builder_name, offsets_name, field_name });
-            switch (ty.base_type) {
+            switch (field.type.base_type) {
                 .none, .utype, .bool, .byte, .ubyte, .short, .ushort, .int, .uint, .long, .ulong, .float, .double, .array => {},
                 .string => {
                     const offset = try self.string_pool.getOrPutFmt(
@@ -606,7 +511,7 @@ pub const CodeWriter = struct {
         }
     }
 
-    fn writePackFn(self: *Self, writer: anytype, object: types.Object) !void {
+    fn writePackFn(self: *Self, writer: anytype, object: Object) !void {
         var offset_map = OffsetMap.init(self.allocator);
         defer offset_map.deinit();
 
@@ -623,9 +528,7 @@ pub const CodeWriter = struct {
         // Write field pack code to buffer to gather offsets
         var field_pack_code = std.ArrayList(u8).init(self.allocator);
         defer field_pack_code.deinit();
-        const fields = try self.sortedFields(object);
-        defer self.allocator.free(fields);
-        for (fields) |field| {
+        for (object.fields) |field| {
             try self.writePackForField(
                 field_pack_code.writer(),
                 field,
@@ -648,28 +551,29 @@ pub const CodeWriter = struct {
         }
         try writer.writeByte('\n');
 
-        if (fields.len > 0) {
+        const has_fields = object.fields.len > 0;
+
+        if (has_fields) {
             try writer.print(
                 \\
                 \\    try {s}.startTable();
             , .{args[1].name});
         }
-
         try writer.writeAll(field_pack_code.items);
-
-        if (fields.len > 0) {
+        if (has_fields) {
             try writer.print(
                 \\
                 \\    return {s}.endTable();
             , .{args[1].name});
         }
+
         try writer.writeAll("\n}");
     }
 
     fn writeObjectInitFn(
         self: *Self,
         writer: anytype,
-        object: types.Object,
+        object: Object,
         has_allocations: bool,
         packed_name: []const u8,
     ) !void {
@@ -679,26 +583,22 @@ pub const CodeWriter = struct {
         defer args.deinit();
 
         if (has_allocations) try args.append(
-            .{ .name = "allocator", .type = "std.mem.allocator" },
+            .{ .name = "allocator", .type = "std.mem.Allocator" },
         );
         try args.append(.{ .name = "packed_", .type = packed_name });
 
         try self.writeFnSig(writer, "init", self_ident, args.items);
         try writer.writeAll("\nreturn .{");
 
-        const fields = try self.sortedFields(object);
-        defer self.allocator.free(fields);
-        for (fields) |field| {
-            const nice_type = try Type.initFromField(field);
-            if (nice_type.base_type == .utype or (try field.deprecated())) continue;
-            const name = try field.name();
-            const field_name = try self.getFieldName(name);
-            const field_type = try self.getType(try field.type(), false, false);
-            const field_getter = try self.getFunctionName(name);
+        for (object.fields) |field| {
+            if (field.type.base_type == .utype or field.deprecated) continue;
+            const field_name = try self.getFieldName(field.name);
+            const field_type = try self.getType(field.type);
+            const field_getter = try self.getFunctionName(field.name);
             const arg_index: usize = if (has_allocations) 1 else 0;
-            if (try nice_type.isAllocated(self.schema)) {
+            if (try field.type.isAllocated(self.schema)) {
                 const module_name = try self.putDeclaration(self.opts.module_name, self.opts.module_name);
-                if (try nice_type.isIndirect(self.schema)) {
+                if (try field.type.isIndirect(self.schema)) {
                     try writer.print(
                         \\
                         \\    .{s} = try {s}.unpackVector({s}, {s}, {s}, "{s}"),
@@ -757,7 +657,7 @@ pub const CodeWriter = struct {
     fn writeObjectDeinitFn(
         self: *Self,
         writer: anytype,
-        object: types.Object,
+        object: Object,
     ) !void {
         _ = try self.putDeclaration("std", "std");
 
@@ -767,14 +667,15 @@ pub const CodeWriter = struct {
             .{ .name = "allocator", .type = "std.mem.Allocator" },
         };
         try self.writeFnSig(writer, "deinit", "void", &args);
-        for (0..try object.fieldsLen()) |i| {
-            const field = try object.fields(i);
-            const nice_type = try Type.init(try field.type());
-            const is_allocated = try nice_type.isAllocated(self.schema);
-            if (is_allocated) try writer.print(
+        for (object.fields) |field| {
+            if (try field.type.isAllocated(self.schema)) try writer.print(
                 \\
                 \\{s}.free({s}.{s});
-            , .{ args[1].name, args[0].name, try field.name() });
+            , .{
+                args[1].name,
+                args[0].name,
+                field.name,
+            });
         }
         try writer.writeAll(
             \\
@@ -782,16 +683,10 @@ pub const CodeWriter = struct {
         );
     }
 
-    fn hasAllocations(self: Self, object: types.Object) !bool {
-        const fields = try self.sortedFields(object);
-        defer self.allocator.free(fields);
-
-        for (fields) |field| {
-            if (try field.deprecated()) continue;
-            const ty = try Type.initFromField(field);
-            if (try ty.child(self.schema)) |c| {
-                if (c == .object_) return true;
-            }
+    fn hasAllocations(self: Self, object: Object) !bool {
+        for (object.fields) |field| {
+            if (field.deprecated) continue;
+            if (try field.type.isAllocated(self.schema)) return true;
         }
         return false;
     }
@@ -799,15 +694,13 @@ pub const CodeWriter = struct {
     fn writeObject(
         self: *Self,
         writer: anytype,
-        object: types.Object,
+        object: Object,
         comptime is_packed: bool,
     ) !void {
-        try writeComment(writer, object, true);
-        const object_name = try object.name();
-        const type_name = try self.getTypeName(object_name, false);
-        const packed_name = try self.getTypeName(object_name, true);
-        const is_struct = try object.isStruct();
-        if (is_packed and is_struct) return;
+        // try writeComment(writer, object, true);
+        const type_name = try self.getTypeName(object.name, false);
+        const packed_name = try self.getTypeName(object.name, true);
+        if (is_packed and object.is_struct) return;
         const self_ident = self.ident_map.get("Self").?;
 
         if (is_packed) {
@@ -823,15 +716,15 @@ pub const CodeWriter = struct {
             , .{ packed_name, mod_decl, self_ident });
 
             try self.writePackedObjectInitFn(writer, mod_decl);
-            try self.writeObjectFields(writer, object, is_packed, is_struct);
+            try self.writeObjectFields(writer, object, is_packed);
         } else {
             try writer.print(
                 \\
                 \\
                 \\pub const {s} = {s}struct {{
-            , .{ type_name, if (is_struct) "extern " else "" });
-            try self.writeObjectFields(writer, object, is_packed, is_struct);
-            if (!is_struct) {
+            , .{ type_name, if (object.is_struct) "extern " else "" });
+            try self.writeObjectFields(writer, object, is_packed);
+            if (!object.is_struct) {
                 try writer.print(
                     \\
                     \\
@@ -855,24 +748,23 @@ pub const CodeWriter = struct {
     fn writeEnumFields(
         self: *Self,
         writer: anytype,
-        enum_: types.Enum,
-        is_union: bool,
+        enum_: Enum,
         comptime is_packed: bool,
     ) !void {
-        for (0..try enum_.valuesLen()) |i| {
-            const enum_val = try enum_.values(i);
-            const tag_name = try self.getTagName(try enum_val.name());
-            try writeComment(writer, enum_val, true);
-            if (is_union) {
-                if (try enum_val.value() == 0) {
+        for (enum_.values) |enum_val| {
+            const tag_name = try self.getTagName(enum_val.name);
+            // try writeComment(writer, enum_val, true);
+            if (enum_.is_union) {
+                if (enum_val.value == 0) {
                     try writer.print("\n\t{s},", .{tag_name});
                 } else {
-                    const ty = try enum_val.unionType();
-                    const typename = try self.getType(ty, is_packed, false);
+                    var ty = enum_val.union_type.?;
+                    ty.is_packed = is_packed;
+                    const typename = try self.getType(ty);
                     try writer.print("\n\t{s}: {s},", .{ tag_name, typename });
                 }
             } else {
-                try writer.print("\n\t{s} = {},", .{ tag_name, try enum_val.value() });
+                try writer.print("\n\t{s} = {},", .{ tag_name, enum_val.value });
             }
         }
     }
@@ -924,22 +816,19 @@ pub const CodeWriter = struct {
     fn writeEnum(
         self: *Self,
         writer: anytype,
-        enum_: types.Enum,
+        enum_: Enum,
         comptime is_packed: bool,
     ) !void {
-        const underlying = try enum_.underlyingType();
-        const base_type = try underlying.baseType();
-        const is_union = base_type == .@"union" or base_type == .utype;
-        if (!is_union and is_packed) return;
+        if (!enum_.is_union and is_packed) return;
 
-        const enum_name = try enum_.name();
-        const type_name = try self.getTypeName(enum_name, false);
-        const packed_name = try self.getTypeName(enum_name, true);
+        log.debug("enum_.name {s}\n", .{enum_.name});
+        const type_name = try self.getTypeName(enum_.name, false);
+        const packed_name = try self.getTypeName(enum_.name, true);
         const declaration = if (is_packed) packed_name else type_name;
         try writer.writeByte('\n');
-        try writeComment(writer, enum_, true);
+        // try writeComment(writer, enum_, true);
         try writer.print("\n\npub const {s} = ", .{declaration});
-        if (is_union) {
+        if (enum_.is_union) {
             try writer.writeAll("union(");
             if (is_packed) {
                 try writer.writeAll("enum");
@@ -948,11 +837,11 @@ pub const CodeWriter = struct {
             }
             try writer.writeAll(") {");
         } else {
-            const typename = (try Type.init(underlying)).name();
+            const typename = enum_.underlying_type.base_type.name();
             try writer.print(" enum({s}) {{", .{typename});
         }
-        try self.writeEnumFields(writer, enum_, is_union, is_packed);
-        if (is_union) {
+        try self.writeEnumFields(writer, enum_, is_packed);
+        if (enum_.is_union) {
             if (is_packed) {
                 const ident = try self.putDeclaration(self.ident_map.get("std").?, "std");
                 try writer.print(
@@ -976,17 +865,15 @@ pub const CodeWriter = struct {
         try writer.writeAll("\n};");
     }
 
-    pub fn write(self: *Self, writer: anytype, schema_obj: SchemaObj) !void {
-        try self.initIdentMap(schema_obj);
-        switch (schema_obj) {
-            .enum_ => |e| {
-                try self.writeEnum(writer, e, false);
-                try self.writeEnum(writer, e, true);
-            },
-            .object => |o| {
-                try self.writeObject(writer, o, false);
-                try self.writeObject(writer, o, true);
-            },
+    pub fn write(self: *Self, writer: anytype, obj_or_enum: anytype) !void {
+        try self.initIdentMap(obj_or_enum);
+        if (@hasField(@TypeOf(obj_or_enum), "fields")) {
+            std.sort.pdq(types.Field, obj_or_enum.fields, {}, Field.lessThan);
+            try self.writeObject(writer, obj_or_enum, false);
+            try self.writeObject(writer, obj_or_enum, true);
+        } else {
+            try self.writeEnum(writer, obj_or_enum, false);
+            try self.writeEnum(writer, obj_or_enum, true);
         }
     }
 

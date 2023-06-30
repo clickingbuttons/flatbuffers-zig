@@ -8,6 +8,7 @@ const CodeWriter = writer_mod.CodeWriter;
 const Options = types.Options;
 const BaseType = types.BaseType;
 const Schema = types.Schema;
+const PackedSchema = types.PackedSchema;
 const Prelude = types.Prelude;
 const log = types.log;
 const SchemaObj = writer_mod.SchemaObj;
@@ -57,29 +58,6 @@ fn format(allocator: Allocator, fname: []const u8, code: [:0]const u8) ![]const 
     return try ast.render(allocator);
 }
 
-// Caller owns memory.
-fn getCode(
-    allocator: Allocator,
-    opts: Options,
-    prelude: Prelude,
-    schema: Schema,
-    n_dirs: usize,
-    obj: SchemaObj,
-) ![:0]const u8 {
-    var res = std.ArrayList(u8).init(allocator);
-    var code_writer = CodeWriter.init(allocator, schema, opts, n_dirs);
-    defer code_writer.deinit();
-
-    // Write code body to temporary buffer to gather import declarations.
-    var body = std.ArrayList(u8).init(allocator);
-    defer body.deinit();
-    try code_writer.write(body.writer(), obj);
-
-    try code_writer.writePrelude(res.writer(), prelude, try obj.name());
-    try res.appendSlice(body.items);
-    return try res.toOwnedSliceSentinel(0);
-}
-
 fn writeFormattedCode(allocator: Allocator, fname: []const u8, code: [:0]const u8) !void {
     var file = try createFile(fname);
     defer file.close();
@@ -95,48 +73,50 @@ fn writeFiles(
     opts: Options,
     prelude: Prelude,
     schema: Schema,
-    comptime kind: SchemaObj.Tag,
+    comptime kind: enum { @"enum", object },
 ) !void {
-    const len = switch (kind) {
-        .enum_ => try schema.enumsLen(),
-        .object => try schema.objectsLen(),
+    const object_or_enums = switch (kind) {
+        .@"enum" => schema.enums,
+        .object => schema.objects,
     };
 
-    for (0..len) |i| {
-        const obj: SchemaObj = switch (kind) {
-            .enum_ => .{ .enum_ = try schema.enums(i) },
-            .object => .{ .object = try schema.objects(i) },
-        };
-        const decl_file = try obj.declarationFile();
-        const same_file = decl_file.len == 0 or std.mem.eql(u8, decl_file, prelude.file_ident);
+    for (object_or_enums) |obj| {
+        const same_file = obj.declaration_file.len == 0 or std.mem.eql(u8, obj.declaration_file, prelude.file_ident);
         if (!same_file) continue;
 
-        const name = try obj.name();
-        const fname = try getFilename(allocator, opts, name);
+        const fname = try getFilename(allocator, opts, obj.name);
         defer allocator.free(fname);
         log.debug("fname {s}", .{fname});
-        const n_dirs = std.mem.count(u8, name, ".");
+        const n_dirs = std.mem.count(u8, obj.name, ".");
 
-        const code = try getCode(allocator, opts, prelude, schema, n_dirs, obj);
-        defer allocator.free(code);
+        var code_writer = CodeWriter.init(allocator, schema, opts, n_dirs);
+        defer code_writer.deinit();
+        var code = std.ArrayList(u8).init(allocator);
+        defer code.deinit();
+        try code_writer.write(code.writer(), obj);
 
-        try writeFormattedCode(allocator, fname, code);
+        try writeFormattedCode(allocator, fname, try code.toOwnedSliceSentinel(0));
     }
 }
 
 pub fn codegen(allocator: Allocator, bfbs_path: []const u8, bfbs_bytes: []const u8, opts: Options) !void {
-    const schema = try Schema.init(bfbs_bytes);
+    const packed_schema = try PackedSchema.init(bfbs_bytes);
+    const schema = try Schema.init(allocator, packed_schema);
     const basename = std.fs.path.basename(bfbs_path);
     const no_ext = basename[0 .. basename.len - 4];
     const file_ident = try std.fmt.allocPrint(allocator, "//{s}.fbs", .{no_ext});
     defer allocator.free(file_ident);
-    log.debug("file_ident={s} n_enums={d} n_objs={d}", .{ file_ident, try schema.enumsLen(), try schema.objectsLen() });
+    log.debug("file_ident={s} n_enums={d} n_objs={d}", .{
+        file_ident,
+        schema.enums.len,
+        schema.objects.len,
+    });
 
     const prelude = types.Prelude{
         .filename_noext = no_ext,
         .file_ident = file_ident,
     };
 
-    try writeFiles(allocator, opts, prelude, schema, .enum_);
+    try writeFiles(allocator, opts, prelude, schema, .@"enum");
     try writeFiles(allocator, opts, prelude, schema, .object);
 }
