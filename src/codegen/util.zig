@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 
+const Allocator = std.mem.Allocator;
 pub const Arg = struct {
     name: []const u8,
     type: []const u8,
@@ -73,4 +74,21 @@ test "toCamelCase" {
     try buf.resize(0);
     try toCamelCase(buf.writer(), "Not Camel Case");
     try std.testing.expectEqualStrings("notCamelCase", buf.items);
+}
+
+pub fn format(allocator: Allocator, fname: []const u8, code: [:0]const u8) ![]const u8 {
+    var ast = try std.zig.Ast.parse(allocator, code, .zig);
+    defer ast.deinit(allocator);
+
+    if (ast.errors.len > 0) {
+        for (ast.errors) |err| {
+            var buf = std.ArrayList(u8).init(allocator);
+            defer buf.deinit();
+            ast.renderError(err, buf.writer()) catch {};
+            types.log.err("formatting {s}: {s}", .{ fname, buf.items });
+        }
+        return try allocator.dupe(u8, code);
+    }
+
+    return try ast.render(allocator);
 }

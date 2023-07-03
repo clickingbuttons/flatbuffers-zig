@@ -9,7 +9,6 @@ pub fn unpackVector(
     comptime T: type,
     packed_: anytype,
     comptime getter_name: []const u8,
-    comptime has_allocator: bool,
 ) ![]T {
     const PackedT = @TypeOf(packed_);
     const len_getter = @field(PackedT, getter_name ++ "Len");
@@ -17,6 +16,7 @@ pub fn unpackVector(
     var res = try allocator.alloc(T, len);
     errdefer allocator.free(res);
     const getter = @field(PackedT, getter_name);
+    const has_allocator = @typeInfo(@TypeOf(T.init)).Fn.params.len == 2;
     for (res, 0..) |*r, i| r.* = if (has_allocator)
         try T.init(allocator, try getter(packed_, @intCast(u32, i)))
     else

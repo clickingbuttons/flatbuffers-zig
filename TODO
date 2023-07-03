@@ -6,12 +6,13 @@
 	- [x] handwrite reflection.zig
 	- [x] hook up
 	- [ ] bug squash
-		- [ ] add `=  default` to struct fields
-		- [ ] use readFieldWithDefault
-		- [ ] fix @import("lib name")
-		- [ ] don't create deinit if no fields make allocations
-		- [ ] don't pass allocator if no fields make allocations
+		- [x] add `=  default` to struct fields
+		- [x] use readFieldWithDefault
+		- [x] fix @import("lib name")
+		- [x] don't create deinit if no fields make allocations
+		- [x] don't pass allocator if no fields make allocations
+		- [x] required
+		- [ ]  fix deinit !void to void
 options:
-- [ ] required
 - [ ] casing for function names
 - [ ] setters

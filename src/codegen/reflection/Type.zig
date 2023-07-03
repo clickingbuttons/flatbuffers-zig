@@ -7,12 +7,12 @@
 
 const std = @import("std");
 const flatbuffers = @import("flatbuffers");
-const Types = @import("./lib.zig");
+const types = @import("./lib.zig");
 
 pub const ChildType = union(enum) {
-    scalar: Types.BaseType,
-    @"enum": Types.Enum,
-    object: Types.Object,
+    scalar: types.BaseType,
+    @"enum": types.Enum,
+    object: types.Object,
 
     const Self = @This();
     const Tag = std.meta.Tag(Self);
@@ -54,8 +54,8 @@ pub const ChildType = union(enum) {
 };
 
 pub const Type = struct {
-    base_type: Types.BaseType = @intToEnum(Types.BaseType, 0),
-    element: Types.BaseType = @intToEnum(Types.BaseType, 0),
+    base_type: types.BaseType = @intToEnum(types.BaseType, 0),
+    element: types.BaseType = @intToEnum(types.BaseType, 0),
     index: i32 = -1,
     fixed_length: u16 = 0,
     base_size: u32 = 4,
@@ -79,8 +79,8 @@ pub const Type = struct {
 
     pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
         try builder.startTable();
-        try builder.appendTableField(Types.BaseType, self.base_type);
-        try builder.appendTableField(Types.BaseType, self.element);
+        try builder.appendTableField(types.BaseType, self.base_type);
+        try builder.appendTableField(types.BaseType, self.element);
         try builder.appendTableField(i32, self.index);
         try builder.appendTableField(u16, self.fixed_length);
         try builder.appendTableField(u32, self.base_size);
@@ -89,7 +89,7 @@ pub const Type = struct {
     }
 
     // Added declarations to aid codegen
-    pub fn child(self: Self, schema: Types.Schema) !?ChildType {
+    pub fn child(self: Self, schema: types.Schema) !?ChildType {
         switch (self.base_type) {
             .array, .vector => {
                 if (self.element.isScalar()) return .{ .scalar = self.element };
@@ -114,7 +114,7 @@ pub const Type = struct {
         return null;
     }
 
-    pub fn isIndirect(self: Self, schema: Types.Schema) !bool {
+    pub fn isIndirect(self: Self, schema: types.Schema) !bool {
         if (self.base_type == .vector) {
             if (try self.child(schema)) |c| {
                 if (!c.type().base_type.isScalar()) return !c.isStruct();
@@ -123,13 +123,20 @@ pub const Type = struct {
         return false;
     }
 
-    pub fn isAllocated(self: Self, schema: Types.Schema) !bool {
+    pub fn isAllocated(self: Self, schema: types.Schema) !bool {
         if (self.base_type == .vector) {
             if (try self.child(schema)) |c| {
                 if (!c.type().base_type.isScalar()) return true;
             }
         }
         return false;
+    }
+
+    pub fn isPackable(self: Self) bool {
+        return switch (self.base_type) {
+            .obj, .@"union" => true,
+            else => false,
+        };
     }
 };
 
@@ -142,12 +149,12 @@ pub const PackedType = struct {
         return .{ .table = try flatbuffers.Table.init(size_prefixed_bytes) };
     }
 
-    pub fn baseType(self: Self) !Types.BaseType {
-        return self.table.readFieldWithDefault(Types.BaseType, 0, @intToEnum(Types.BaseType, 0));
+    pub fn baseType(self: Self) !types.BaseType {
+        return self.table.readFieldWithDefault(types.BaseType, 0, @intToEnum(types.BaseType, 0));
     }
 
-    pub fn element(self: Self) !Types.BaseType {
-        return self.table.readFieldWithDefault(Types.BaseType, 1, @intToEnum(Types.BaseType, 0));
+    pub fn element(self: Self) !types.BaseType {
+        return self.table.readFieldWithDefault(types.BaseType, 1, @intToEnum(types.BaseType, 0));
     }
 
     pub fn index(self: Self) !i32 {

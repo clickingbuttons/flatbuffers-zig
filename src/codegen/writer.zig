@@ -10,12 +10,9 @@ const Enum = types.Enum;
 
 const Allocator = std.mem.Allocator;
 const log = types.log;
-
 const Arg = util.Arg;
-const toCamelCase = util.toCamelCase;
-const toTitleCase = util.toTitleCase;
-const toSnakeCase = util.toSnakeCase;
 
+/// Generates code for a single source file.
 pub const CodeWriter = struct {
     const Self = @This();
     const ImportDeclarations = std.StringHashMap([]const u8);
@@ -26,6 +23,8 @@ pub const CodeWriter = struct {
     const OffsetMap = std.StringHashMap([]const u8);
     const IdentMap = std.StringHashMap([]const u8);
 
+    buffer: std.ArrayList(u8),
+    written_enum_or_object_idents: std.ArrayList([]const u8),
     allocator: Allocator,
     import_declarations: ImportDeclarations,
     string_pool: StringPool,
@@ -43,6 +42,8 @@ pub const CodeWriter = struct {
         prelude: types.Prelude,
     ) Self {
         return .{
+            .buffer = std.ArrayList(u8).init(allocator),
+            .written_enum_or_object_idents = std.ArrayList([]const u8).init(allocator),
             .allocator = allocator,
             .import_declarations = ImportDeclarations.init(allocator),
             .string_pool = StringPool.init(allocator),
@@ -55,13 +56,14 @@ pub const CodeWriter = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        self.buffer.deinit();
+        self.written_enum_or_object_idents.deinit();
         self.import_declarations.deinit();
         self.ident_map.deinit();
         self.string_pool.deinit();
     }
 
     fn initIdentMap(self: *Self, obj_or_enum: anytype) !void {
-        self.ident_map.clearRetainingCapacity();
         const type_name = try self.getTypeName(obj_or_enum.name, false);
         const packed_name = try self.getTypeName(obj_or_enum.name, true);
         try self.ident_map.put(type_name, type_name);
@@ -94,7 +96,7 @@ pub const CodeWriter = struct {
     fn getIdentifier(self: *Self, ident: []const u8) ![]const u8 {
         const zig = std.zig;
         if (zig.Token.getKeyword(ident) != null or zig.primitives.isPrimitive(ident)) {
-            const buf = try std.fmt.allocPrint(self.allocator, "@\"{s}\"", .{ident});
+            const buf = try self.allocPrint("@\"{s}\"", .{ident});
             defer self.allocator.free(buf);
             return self.string_pool.getOrPut(buf);
         } else {
@@ -104,7 +106,7 @@ pub const CodeWriter = struct {
 
     // This struct owns returned string
     fn getPrefixedIdentifier(self: *Self, ident: []const u8, prefix: []const u8) ![]const u8 {
-        var prefixed = try std.fmt.allocPrint(self.allocator, "{s} {s}", .{ prefix, ident });
+        var prefixed = try self.allocPrint("{s} {s}", .{ prefix, ident });
         defer self.allocator.free(prefixed);
 
         return try getIdentifier(prefixed);
@@ -115,13 +117,13 @@ pub const CodeWriter = struct {
         var res = std.ArrayList(u8).init(self.allocator);
         defer res.deinit();
 
-        try toCamelCase(res.writer(), name);
+        try util.toCamelCase(res.writer(), name);
         return try self.getIdentifier(res.items);
     }
 
     // This struct owns returned string
     fn getPrefixedFunctionName(self: *Self, prefix: []const u8, name: []const u8) ![]const u8 {
-        var prefixed = try std.fmt.allocPrint(self.allocator, "{s} {s}", .{ prefix, name });
+        var prefixed = try self.allocPrint("{s} {s}", .{ prefix, name });
         defer self.allocator.free(prefixed);
 
         return try self.getFunctionName(prefixed);
@@ -132,7 +134,7 @@ pub const CodeWriter = struct {
         var res = std.ArrayList(u8).init(self.allocator);
         defer res.deinit();
 
-        try toSnakeCase(res.writer(), name);
+        try util.toSnakeCase(res.writer(), name);
         return self.getIdentifier(res.items);
     }
 
@@ -141,19 +143,19 @@ pub const CodeWriter = struct {
         var res = std.ArrayList(u8).init(self.allocator);
         defer res.deinit();
 
-        try toSnakeCase(res.writer(), name);
+        try util.toSnakeCase(res.writer(), name);
         return self.getIdentifier(res.items);
     }
 
     // This struct owns returned string
     fn getPrefixedTypeName(self: *Self, prefix: []const u8, name: []const u8) ![]const u8 {
-        var tmp = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ prefix, name });
+        var tmp = try self.allocPrint("{s}{s}", .{ prefix, name });
         defer self.allocator.free(tmp);
 
         var res = std.ArrayList(u8).init(self.allocator);
         defer res.deinit();
 
-        try toTitleCase(res.writer(), tmp);
+        try util.toTitleCase(res.writer(), tmp);
         return try self.getIdentifier(res.items);
     }
 
@@ -162,6 +164,11 @@ pub const CodeWriter = struct {
         return self.getPrefixedTypeName(if (is_packed) "packed " else "", name);
     }
 
+    pub fn allocPrint(self: *Self, comptime fmt: []const u8, args: anytype) ![]u8 {
+        return try std.fmt.allocPrint(self.allocator, fmt, args);
+    }
+
+    /// Caller owns returned string.
     fn getMaybeModuleTypeName(self: *Self, type_: Type) ![]const u8 {
         switch (type_.base_type) {
             .array, .vector => |t| {
@@ -171,36 +178,43 @@ pub const CodeWriter = struct {
                     .is_packed = type_.is_packed,
                 };
                 const next_name = try self.getMaybeModuleTypeName(next_type);
+                defer self.allocator.free(next_name);
                 if (t == .array) {
-                    return try std.fmt.allocPrint(self.allocator, "[{d}]{s}", .{ type_.fixed_length, next_name });
+                    return try self.allocPrint("[{d}]{s}", .{ type_.fixed_length, next_name });
                 } else {
-                    return try std.fmt.allocPrint(self.allocator, "[]{s}", .{next_name});
+                    return try self.allocPrint("[]{s}", .{next_name});
                 }
             },
             else => |t| {
                 if (try type_.child(self.schema)) |child| {
-                    const decl_name = try self.getTmpName("types");
-                    var mod_name = std.ArrayList(u8).init(self.allocator);
-                    defer mod_name.deinit();
-                    for (0..self.n_dirs) |_| try mod_name.appendSlice("../");
-                    try mod_name.appendSlice("lib.zig");
-                    _ = try self.putDeclaration(decl_name, mod_name.items);
+                    var decl_name: []const u8 = "";
+                    if (!self.opts.single_file) {
+                        decl_name = try self.getTmpName("types");
+                        var mod_name = std.ArrayList(u8).init(self.allocator);
+                        defer mod_name.deinit();
+                        for (0..self.n_dirs) |_| try mod_name.appendSlice("../");
+                        try mod_name.appendSlice("lib.zig");
+                        _ = try self.putDeclaration(decl_name, mod_name.items);
+                    }
 
-                    const is_packed = (type_.base_type == .@"union" or type_.base_type == .obj) and type_.is_packed or type_.base_type == .utype;
-
+                    const is_packed = type_.is_packed and type_.isPackable();
                     const typename = try self.getTypeName(child.name(), is_packed);
-                    return std.fmt.allocPrint(self.allocator, "{s}{s}.{s}{s}", .{
+                    return self.allocPrint("{s}{s}{s}{s}{s}", .{
                         if (type_.is_optional and t != .@"union") "?" else "",
                         decl_name,
+                        if (decl_name.len > 0) "." else "",
                         typename,
                         if (t == .utype) ".Tag" else "",
                     });
                 } else if (t == .utype or t == .obj or t == .@"union") {
-                    const err = try std.fmt.allocPrint(self.allocator, "type index {d} for {any} not in schema", .{ type_.index, t });
+                    const err = try self.allocPrint(
+                        "type index {d} for {any} not in schema",
+                        .{ type_.index, t },
+                    );
                     log.err("{s}", .{err});
                     return err;
                 } else {
-                    return try std.fmt.allocPrint(self.allocator, "{s}", .{type_.base_type.name()});
+                    return try self.allocPrint("{s}", .{type_.base_type.name()});
                 }
             },
         }
@@ -215,10 +229,10 @@ pub const CodeWriter = struct {
     }
 
     // This struct owns returned string.
-    fn getTmpName(self: *Self, wanted_name: []const u8) ![]const u8 {
-        var actual_name = try self.allocator.alloc(u8, wanted_name.len);
+    fn getTmpName(self: *Self, name: []const u8) ![]const u8 {
+        var actual_name = try self.allocator.alloc(u8, name.len);
         defer self.allocator.free(actual_name);
-        @memcpy(actual_name, wanted_name);
+        @memcpy(actual_name, name);
 
         while (self.ident_map.get(actual_name)) |_| {
             actual_name = try self.allocator.realloc(actual_name, actual_name.len + 1);
@@ -229,8 +243,8 @@ pub const CodeWriter = struct {
     }
 
     // This struct owns returned string.
-    fn getPrefixedTmpName(self: *Self, prefix: []const u8, wanted_name: []const u8) ![]const u8 {
-        var prefixed = try std.fmt.allocPrint(self.allocator, "{s} {s}", .{ prefix, wanted_name });
+    fn getPrefixedTmpName(self: *Self, prefix: []const u8, name: []const u8) ![]const u8 {
+        var prefixed = try self.allocPrint("{s} {s}", .{ prefix, name });
         defer self.allocator.free(prefixed);
 
         return try self.getTmpName(prefixed);
@@ -238,11 +252,12 @@ pub const CodeWriter = struct {
 
     fn writeFnSig(
         self: *Self,
-        writer: anytype,
         name: []const u8,
+        return_error: bool,
         return_type: []const u8,
         args: []Arg,
     ) !void {
+        const writer = self.buffer.writer();
         try writer.print(
             \\
             \\pub fn {s}(
@@ -253,22 +268,22 @@ pub const CodeWriter = struct {
             try writer.print("{s}: {s}", .{ arg.name, arg.type });
             if (i != args.len - 1) try writer.writeByte(',');
         }
-        try writer.print(") !{s} {{", .{return_type});
+        try writer.print(") {s}{s} {{", .{ if (return_error) "!" else "", return_type });
     }
 
     fn writeObjectFieldScalarFns(
         self: *Self,
-        writer: anytype,
         field: types.Field,
         getter_name: []const u8,
         typename: []const u8,
     ) !void {
+        const writer = self.buffer.writer();
         var args = [_]Arg{
             .{ .name = "self", .type = "Self" },
         };
-        try self.writeFnSig(writer, getter_name, typename, &args);
+        try self.writeFnSig(getter_name, true, typename, &args);
         const default = try self.getDefault(field);
-        if (default.len > 0 and !std.mem.eql(u8, default, "null")) {
+        if (!field.required and default.len > 0 and !std.mem.eql(u8, default, "null")) {
             try writer.print(
                 \\
                 \\    return {s}.table.readFieldWithDefault({s}, {d}, {s});
@@ -292,16 +307,13 @@ pub const CodeWriter = struct {
         }
     }
 
-    fn writeObjectFieldVectorLenFn(
-        self: *Self,
-        writer: anytype,
-        field: types.Field,
-    ) !void {
+    fn writeObjectFieldVectorLenFn(self: *Self, field: types.Field) !void {
+        const writer = self.buffer.writer();
         const len_getter_name = try self.getPrefixedFunctionName(field.name, "len");
         var args = [_]Arg{
             .{ .name = "self", .type = "Self" },
         };
-        try self.writeFnSig(writer, len_getter_name, "u32", &args);
+        try self.writeFnSig(len_getter_name, true, "u32", &args);
         try writer.print(
             \\
             \\    return {s}.table.readFieldVectorLen({d});
@@ -311,16 +323,16 @@ pub const CodeWriter = struct {
 
     fn writeObjectFieldUnionFn(
         self: *Self,
-        writer: anytype,
         field: types.Field,
         getter_name: []const u8,
         typename: []const u8,
     ) !void {
+        const writer = self.buffer.writer();
         const tag_getter_name = try self.getPrefixedFunctionName(field.name, "type");
         var args = [_]Arg{
             .{ .name = "self", .type = "Self" },
         };
-        try self.writeFnSig(writer, getter_name, typename, &args);
+        try self.writeFnSig(getter_name, true, typename, &args);
         try writer.print(
             \\
             \\    return switch (try {s}.{s}()) {{
@@ -337,16 +349,16 @@ pub const CodeWriter = struct {
 
     fn writeObjectFieldVectorFn(
         self: *Self,
-        writer: anytype,
         field: types.Field,
         getter_name: []const u8,
         typename: []const u8,
     ) !void {
+        const writer = self.buffer.writer();
         var args = [_]Arg{
             .{ .name = "self", .type = "Self" },
             .{ .name = "index", .type = "usize" },
         };
-        try self.writeFnSig(writer, getter_name, typename[2..], &args);
+        try self.writeFnSig(getter_name, true, typename[2..], &args);
         try writer.print(
             \\
             \\    return {s}.table.readFieldVectorItem({s}, {d}, {s});
@@ -359,35 +371,33 @@ pub const CodeWriter = struct {
         });
     }
 
-    fn writeObjectFields(
-        self: *Self,
-        writer: anytype,
-        object: Object,
-        comptime is_packed: bool,
-    ) !void {
+    fn writeObjectFields(self: *Self, object: Object, comptime is_packed: bool) !void {
+        const writer = self.buffer.writer();
         for (object.fields) |field| {
             if (field.deprecated) continue;
             const name = try self.getFieldName(field.name);
             const is_indirect = try field.type.isIndirect(self.schema);
-            const typename = try self.getType(field.type);
-            // try writeComment(writer, field, true);
+            var field_type = field.type;
+            field_type.is_packed = is_packed;
+            const typename = try self.getType(field_type);
+            // try writeComment(field, true);
             if (is_packed) {
                 const getter_name = try self.getFunctionName(name);
                 // const setter_name = try self.getPrefixedFunctionName("set", try field.name());
 
                 try writer.writeByte('\n');
                 switch (field.type.base_type) {
-                    .utype, .bool, .byte, .ubyte, .short, .ushort, .int, .uint, .long, .ulong, .float, .double, .obj, .array, .string => try self.writeObjectFieldScalarFns(writer, field, getter_name, typename),
+                    .utype, .bool, .byte, .ubyte, .short, .ushort, .int, .uint, .long, .ulong, .float, .double, .obj, .array, .string => try self.writeObjectFieldScalarFns(field, getter_name, typename),
                     .vector => {
                         if (is_indirect) {
-                            try self.writeObjectFieldVectorLenFn(writer, field);
-                            try self.writeObjectFieldVectorFn(writer, field, getter_name, typename);
+                            try self.writeObjectFieldVectorLenFn(field);
+                            try self.writeObjectFieldVectorFn(field, getter_name, typename);
                         } else {
-                            const aligned_typename = try std.fmt.allocPrint(self.allocator, "[]align(1) {s}", .{typename[2..]});
-                            try self.writeObjectFieldScalarFns(writer, field, getter_name, aligned_typename);
+                            const aligned_typename = try self.allocPrint("[]align(1) {s}", .{typename[2..]});
+                            try self.writeObjectFieldScalarFns(field, getter_name, aligned_typename);
                         }
                     },
-                    .@"union" => try self.writeObjectFieldUnionFn(writer, field, getter_name, typename),
+                    .@"union" => try self.writeObjectFieldUnionFn(field, getter_name, typename),
                     else => {},
                 }
             } else if (field.type.base_type != .utype) {
@@ -410,11 +420,11 @@ pub const CodeWriter = struct {
         const default_int = field.default_integer;
 
         const res = switch (field.type.base_type) {
-            .utype => try std.fmt.allocPrint(self.allocator, "@intToEnum({s}, {d})", .{
+            .utype => try self.allocPrint("@intToEnum({s}, {d})", .{
                 try self.getType(field.type),
                 default_int,
             }),
-            .bool => try std.fmt.allocPrint(self.allocator, "{s}", .{
+            .bool => try self.allocPrint("{s}", .{
                 if (default_int == 0) "false" else "true",
             }),
             .byte, .ubyte, .short, .ushort, .int, .uint, .long, .ulong =>
@@ -433,17 +443,17 @@ pub const CodeWriter = struct {
                 const T = if (t == .float) "f32" else "f64";
                 if (std.math.isNan(default)) {
                     const std_mod = try self.putDeclaration("std", "std");
-                    break :brk try std.fmt.allocPrint(self.allocator, "{s}.math.nan({s})", .{ std_mod, T });
+                    break :brk try self.allocPrint("{s}.math.nan({s})", .{ std_mod, T });
                 }
                 if (std.math.isInf(default)) {
                     const std_mod = try self.putDeclaration("std", "std");
                     const sign = if (std.math.isNegativeInf(default)) "-" else "";
-                    break :brk try std.fmt.allocPrint(self.allocator, "{s}{s}.math.inf({s})", .{ sign, std_mod, T });
+                    break :brk try self.allocPrint("{s}{s}.math.inf({s})", .{ sign, std_mod, T });
                 }
-                break :brk try std.fmt.allocPrint(self.allocator, "{e}", .{field.default_real});
+                break :brk try self.allocPrint("{e}", .{field.default_real});
             },
-            .obj => try std.fmt.allocPrint(self.allocator, "{s}", .{if (field.optional) "null" else ".{}"}),
-            .@"union", .array, .vector, .string => try std.fmt.allocPrint(self.allocator, "", .{}),
+            .obj => try self.allocPrint("{s}", .{if (field.optional) "null" else ".{}"}),
+            .@"union", .array, .vector, .string => try self.allocPrint("", .{}),
             else => |t| {
                 log.err("cannot get default for base type {any}", .{t});
                 return error.InvalidBaseType;
@@ -463,7 +473,7 @@ pub const CodeWriter = struct {
         offsets_name: []const u8,
     ) !void {
         const field_name = try self.getFieldName(field.name);
-        const ty_name = try self.getMaybeModuleTypeName(field.type);
+        const ty_name = try self.getType(field.type);
         const is_indirect = try field.type.isIndirect(self.schema);
         const is_offset = switch (field.type.base_type) {
             .obj => is_indirect,
@@ -519,7 +529,8 @@ pub const CodeWriter = struct {
         }
     }
 
-    fn writePackFn(self: *Self, writer: anytype, object: Object) !void {
+    fn writePackFn(self: *Self, object: Object) !void {
+        const writer = self.buffer.writer();
         var offset_map = OffsetMap.init(self.allocator);
         defer offset_map.deinit();
 
@@ -529,7 +540,7 @@ pub const CodeWriter = struct {
             .{ .name = "builder", .type = "*flatbuffers.Builder" },
         };
         try writer.writeByte('\n');
-        try self.writeFnSig(writer, "pack", "u32", &args);
+        try self.writeFnSig("pack", true, "u32", &args);
 
         const offsets_name = try self.getTmpName("field_offsets");
 
@@ -580,11 +591,11 @@ pub const CodeWriter = struct {
 
     fn writeObjectInitFn(
         self: *Self,
-        writer: anytype,
         object: Object,
         has_allocations: bool,
         packed_name: []const u8,
     ) !void {
+        const writer = self.buffer.writer();
         const self_ident = self.ident_map.get("Self").?;
 
         var args = std.ArrayList(Arg).init(self.allocator);
@@ -595,7 +606,7 @@ pub const CodeWriter = struct {
         );
         try args.append(.{ .name = "packed_", .type = packed_name });
 
-        try self.writeFnSig(writer, "init", self_ident, args.items);
+        try self.writeFnSig("init", true, self_ident, args.items);
         try writer.writeAll("\nreturn .{");
 
         for (object.fields) |field| {
@@ -631,6 +642,38 @@ pub const CodeWriter = struct {
                         field_getter,
                     });
                 }
+            } else if (field.type.base_type == .obj) {
+                const child = (try field.type.child(self.schema)).?;
+                const child_allocated = switch (child) {
+                    .object => |o| try self.hasAllocations(o),
+                    else => false,
+                };
+                const maybe_allocator_param = if (child_allocated) try self.allocPrint("{s}, ", .{args.items[0].name}) else try self.allocator.alloc(u8, 0);
+                defer self.allocator.free(maybe_allocator_param);
+                if (field.type.is_optional) {
+                    try writer.print(
+                        \\
+                        \\    .{0s} = if (try {1s}.{2s}()) |{3s}| try {4s}.init({5s}{3s}) else null,
+                    , .{
+                        field_name,
+                        args.items[arg_index].name,
+                        field_getter,
+                        try self.getTmpName(field_name[0..1]),
+                        field_type[1..],
+                        maybe_allocator_param,
+                    });
+                } else {
+                    try writer.print(
+                        \\
+                        \\    .{s} = try {s}.init(try {s}.{s}({s})),
+                    , .{
+                        field_name,
+                        field_type,
+                        args.items[1].name,
+                        field_getter,
+                        maybe_allocator_param,
+                    });
+                }
             } else {
                 try writer.print(
                     \\
@@ -645,16 +688,13 @@ pub const CodeWriter = struct {
         );
     }
 
-    fn writePackedObjectInitFn(
-        self: *Self,
-        writer: anytype,
-        mod_decl: []const u8,
-    ) !void {
+    fn writePackedObjectInitFn(self: *Self, mod_decl: []const u8) !void {
+        const writer = self.buffer.writer();
         const self_ident = self.ident_map.get("Self").?;
         var args = [_]Arg{
             .{ .name = "size_prefixed_bytes", .type = "[]u8" },
         };
-        try self.writeFnSig(writer, "init", self_ident, &args);
+        try self.writeFnSig("init", true, self_ident, &args);
         try writer.print(
             \\
             \\    return .{{ .table = try {s}.Table.init({s}) }};
@@ -662,11 +702,8 @@ pub const CodeWriter = struct {
         , .{ mod_decl, args[0].name });
     }
 
-    fn writeObjectDeinitFn(
-        self: *Self,
-        writer: anytype,
-        object: Object,
-    ) !void {
+    fn writeObjectDeinitFn(self: *Self, object: Object) !void {
+        const writer = self.buffer.writer();
         _ = try self.putDeclaration("std", "std");
 
         const self_ident = self.ident_map.get("Self").?;
@@ -674,16 +711,34 @@ pub const CodeWriter = struct {
             .{ .name = "self", .type = self_ident },
             .{ .name = "allocator", .type = "std.mem.Allocator" },
         };
-        try self.writeFnSig(writer, "deinit", "void", &args);
+        try self.writeFnSig("deinit", false, "void", &args);
         for (object.fields) |field| {
-            if (try field.type.isAllocated(self.schema)) try writer.print(
-                \\
-                \\{s}.free({s}.{s});
-            , .{
-                args[1].name,
-                args[0].name,
-                field.name,
-            });
+            if (try field.type.isAllocated(self.schema)) {
+                const child = (try field.type.child(self.schema)).?;
+                const has_allocations = switch (child) {
+                    .object => |o| try self.hasAllocations(o),
+                    else => false,
+                };
+                if (has_allocations) {
+                    try writer.print(
+                        \\
+                        \\for ({0s}.{1s}) |{2s}| {2s}.deinit({3s});
+                    , .{
+                        args[0].name,
+                        field.name,
+                        try self.getTmpName(field.name[0..1]),
+                        args[1].name,
+                    });
+                }
+                try writer.print(
+                    \\
+                    \\{s}.free({s}.{s});
+                , .{
+                    args[1].name,
+                    args[0].name,
+                    field.name,
+                });
+            }
         }
         try writer.writeAll(
             \\
@@ -700,13 +755,9 @@ pub const CodeWriter = struct {
     }
 
     // Caller owns returned string
-    fn writeObject(
-        self: *Self,
-        writer: anytype,
-        object: Object,
-        comptime is_packed: bool,
-    ) ![]const u8 {
-        // try writeComment(writer, object, true);
+    fn writeObject(self: *Self, object: Object, comptime is_packed: bool) ![]const u8 {
+        const writer = self.buffer.writer();
+        // try writeComment(object, true);
         const type_name = try self.getTypeName(object.name, false);
         const packed_name = try self.getTypeName(object.name, true);
         const self_ident = self.ident_map.get("Self").?;
@@ -723,15 +774,15 @@ pub const CodeWriter = struct {
                 \\
             , .{ packed_name, mod_decl, self_ident });
 
-            try self.writePackedObjectInitFn(writer, mod_decl);
-            try self.writeObjectFields(writer, object, is_packed);
+            try self.writePackedObjectInitFn(mod_decl);
+            try self.writeObjectFields(object, is_packed);
         } else {
             try writer.print(
                 \\
                 \\
                 \\pub const {s} = {s}struct {{
             , .{ type_name, if (object.is_struct) "extern " else "" });
-            try self.writeObjectFields(writer, object, is_packed);
+            try self.writeObjectFields(object, is_packed);
             if (!object.is_struct) {
                 try writer.print(
                     \\
@@ -740,29 +791,25 @@ pub const CodeWriter = struct {
                     \\
                 , .{self_ident});
                 const has_allocations = try self.hasAllocations(object);
-                try self.writeObjectInitFn(writer, object, has_allocations, packed_name);
+                try self.writeObjectInitFn(object, has_allocations, packed_name);
                 try writer.writeByte('\n');
-                if (has_allocations) try self.writeObjectDeinitFn(writer, object);
+                if (has_allocations) try self.writeObjectDeinitFn(object);
 
-                try self.writePackFn(writer, object);
+                try self.writePackFn(object);
             }
         }
         try writer.writeAll(
             \\
             \\};
         );
-        return try self.allocator.dupe(u8, if (is_packed) packed_name else type_name);
+        return if (is_packed) packed_name else type_name;
     }
 
-    fn writeEnumFields(
-        self: *Self,
-        writer: anytype,
-        enum_: Enum,
-        comptime is_packed: bool,
-    ) !void {
+    fn writeEnumFields(self: *Self, enum_: Enum, comptime is_packed: bool) !void {
+        const writer = self.buffer.writer();
         for (enum_.values) |enum_val| {
             const tag_name = try self.getTagName(enum_val.name);
-            // try writeComment(writer, enum_val, true);
+            // try writeComment(enum_val, true);
             if (enum_.is_union) {
                 if (enum_val.value == 0) {
                     try writer.print("\n\t{s},", .{tag_name});
@@ -772,18 +819,21 @@ pub const CodeWriter = struct {
                     const typename = try self.getType(ty);
                     try writer.print("\n\t{s}: {s},", .{ tag_name, typename });
                 }
+            } else if (enum_.isBitFlags()) {
+                try writer.print("\n\t{s}: bool,", .{tag_name});
             } else {
                 try writer.print("\n\t{s} = {},", .{ tag_name, enum_val.value });
             }
         }
     }
 
-    fn writeUnionInitFn(self: *Self, writer: anytype, packed_typename: []const u8) !void {
+    fn writeUnionInitFn(self: *Self, packed_typename: []const u8) !void {
+        const writer = self.buffer.writer();
         const self_ident = self.ident_map.get("Self").?;
         var args = [_]Arg{
             .{ .name = "packed_", .type = packed_typename },
         };
-        try self.writeFnSig(writer, "init", self_ident, &args);
+        try self.writeFnSig("init", true, self_ident, &args);
         const mod_name = try self.putDeclaration(self.opts.module_name, self.opts.module_name);
         try writer.print(
             \\
@@ -800,12 +850,13 @@ pub const CodeWriter = struct {
         , .{ args[0].name, self_ident, mod_name });
     }
 
-    fn writeUnionPackFn(self: *Self, writer: anytype) !void {
+    fn writeUnionPackFn(self: *Self) !void {
+        const writer = self.buffer.writer();
         var args = [_]Arg{
             .{ .name = "self", .type = "Self" },
             .{ .name = "builder", .type = "*flatbuffers.Builder" },
         };
-        try self.writeFnSig(writer, "pack", "u32", &args);
+        try self.writeFnSig("pack", true, "u32", &args);
         const mod_name = try self.putDeclaration(self.opts.module_name, self.opts.module_name);
         try writer.print(
             \\
@@ -823,17 +874,13 @@ pub const CodeWriter = struct {
     }
 
     // Caller owns returned string
-    fn writeEnum(
-        self: *Self,
-        writer: anytype,
-        enum_: Enum,
-        comptime is_packed: bool,
-    ) ![]const u8 {
+    fn writeEnum(self: *Self, enum_: Enum, comptime is_packed: bool) ![]const u8 {
+        const writer = self.buffer.writer();
         const type_name = try self.getTypeName(enum_.name, false);
         const packed_name = try self.getTypeName(enum_.name, true);
         const declaration = if (is_packed) packed_name else type_name;
         try writer.writeByte('\n');
-        // try writeComment(writer, enum_, true);
+        // try writeComment(enum_, true);
         try writer.print("\n\npub const {s} = ", .{declaration});
         if (enum_.is_union) {
             try writer.writeAll("union(");
@@ -843,11 +890,14 @@ pub const CodeWriter = struct {
                 try writer.print("{s}.Tag", .{packed_name});
             }
             try writer.writeAll(") {");
+        } else if (enum_.isBitFlags()) {
+            const typename = enum_.underlying_type.base_type.name();
+            try writer.print("packed struct({s}) {{", .{typename});
         } else {
             const typename = enum_.underlying_type.base_type.name();
             try writer.print(" enum({s}) {{", .{typename});
         }
-        try self.writeEnumFields(writer, enum_, is_packed);
+        try self.writeEnumFields(enum_, is_packed);
         if (enum_.is_union) {
             if (is_packed) {
                 const ident = try self.putDeclaration(self.ident_map.get("std").?, "std");
@@ -864,57 +914,65 @@ pub const CodeWriter = struct {
                     \\
                 , .{self.ident_map.get("Self").?});
 
-                try self.writeUnionInitFn(writer, packed_name);
-                try self.writeUnionPackFn(writer);
+                try self.writeUnionInitFn(packed_name);
+                try self.writeUnionPackFn();
             }
         }
 
         try writer.writeAll("\n};");
 
-        return try self.allocator.dupe(u8, if (is_packed) packed_name else type_name);
+        return if (is_packed) packed_name else type_name;
     }
 
-    // Caller owns returned slice and its contents.
-    pub fn write(self: *Self, writer: anytype, obj_or_enum: anytype) ![][]const u8 {
-        var res = std.ArrayList([]const u8).init(self.allocator);
+    pub fn write(self: *Self, obj_or_enum: anytype) !void {
         try self.initIdentMap(obj_or_enum);
 
-        var body = std.ArrayList(u8).init(self.allocator);
-        defer body.deinit();
-        const body_writer = body.writer();
         if (@hasField(@TypeOf(obj_or_enum), "fields")) {
             std.sort.pdq(types.Field, obj_or_enum.fields, {}, Field.lessThan);
             for (obj_or_enum.fields) |*field| field.type.is_optional = field.optional and !field.required;
-            try res.append(try self.writeObject(body_writer, obj_or_enum, false));
-            if (!obj_or_enum.is_struct) try res.append(try self.writeObject(body_writer, obj_or_enum, true));
+
+            const unpacked_name = try self.writeObject(obj_or_enum, false);
+            try self.written_enum_or_object_idents.append(unpacked_name);
+            if (!obj_or_enum.is_struct) {
+                const packed_name = try self.writeObject(obj_or_enum, true);
+                try self.written_enum_or_object_idents.append(packed_name);
+            }
         } else {
-            try res.append(try self.writeEnum(body_writer, obj_or_enum, false));
-            if (obj_or_enum.is_union) try res.append(try self.writeEnum(body_writer, obj_or_enum, true));
+            const unpacked_name = try self.writeEnum(obj_or_enum, false);
+            try self.written_enum_or_object_idents.append(unpacked_name);
+            if (obj_or_enum.is_union) {
+                const union_name = try self.writeEnum(obj_or_enum, true);
+                try self.written_enum_or_object_idents.append(union_name);
+            }
         }
-
-        try self.writePrelude(writer);
-        try writer.writeAll(body.items);
-
-        return try res.toOwnedSlice();
     }
 
-    pub fn writePrelude(
-        self: *Self,
-        writer: anytype,
-    ) !void {
-        try writer.print("//! generated by flatc-zig from {s}.fbs\n", .{self.prelude.filename_noext});
-        // Rely on index file. This can cause recursive deps for the root file, but zig handles that
-        // without a problem.
-        var keys = std.ArrayList([]const u8).init(self.allocator);
-        defer keys.deinit();
+    /// Caller owns returned string
+    pub fn finish(self: *Self, fname: []const u8, write_prelude: bool) ![]const u8 {
+        var res = std.ArrayList(u8).init(self.allocator);
+        const writer = res.writer();
+        if (write_prelude) {
+            try writer.print("//! generated by flatc-zig from {s}.fbs\n", .{self.prelude.filename_noext});
+            // Rely on index file. This can cause recursive deps for the root file, but zig handles that
+            // without a problem.
+            var keys = std.ArrayList([]const u8).init(self.allocator);
+            defer keys.deinit();
 
-        var iter = self.import_declarations.keyIterator();
-        while (iter.next()) |k| try keys.append(k.*);
-        std.sort.pdq([]const u8, keys.items, {}, util.strcmp);
-        for (keys.items) |k|
-            try writer.print("\nconst {s} = @import(\"{s}\"); ", .{
-                k,
-                self.import_declarations.get(k).?,
-            });
+            var iter = self.import_declarations.keyIterator();
+            while (iter.next()) |k| try keys.append(k.*);
+            std.sort.pdq([]const u8, keys.items, {}, util.strcmp);
+            for (keys.items) |k|
+                try writer.print("\nconst {s} = @import(\"{s}\");", .{
+                    k,
+                    self.import_declarations.get(k).?,
+                });
+        }
+
+        try writer.writeAll(self.buffer.items);
+
+        const with_sentinel = try res.toOwnedSliceSentinel(0);
+        defer self.allocator.free(with_sentinel);
+
+        return try util.format(self.allocator, fname, with_sentinel);
     }
 };

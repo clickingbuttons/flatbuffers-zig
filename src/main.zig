@@ -1,50 +1,8 @@
 const std = @import("std");
 const clap = @import("clap");
 const build_options = @import("build_options");
+const bfbs = @import("./codegen/bfbs.zig").bfbs;
 const codegen = @import("./codegen/lib.zig");
-
-const Allocator = std.mem.Allocator;
-pub const Error = error{
-    InvalidFbs,
-};
-
-/// Caller owns returned bytes.
-/// TODO: add a bytes API upstream.
-pub fn bfbs(allocator: Allocator, include: []const u8, fname: []const u8) ![]const u8 {
-    var argv = std.ArrayList([]const u8).init(allocator);
-    defer argv.deinit();
-    try argv.appendSlice(&.{
-        build_options.flatc_exe_path,
-        "--schema",
-        "--bfbs-comments",
-        "--bfbs-builtins",
-        "--bfbs-gen-embed",
-        "-I",
-        include,
-        "--binary",
-        fname,
-    });
-
-    const exec_res = try std.ChildProcess.exec(.{ .allocator = allocator, .argv = argv.items });
-    if (exec_res.term != .Exited or exec_res.term.Exited != 0) {
-        for (argv.items) |it| std.debug.print("{s} ", .{it});
-        std.debug.print("\nerror: flatc command failure:\n", .{});
-        std.debug.print("{s}\n", .{exec_res.stderr});
-        if (exec_res.stdout.len > 0) try std.io.getStdOut().writer().print("{s}\n", .{exec_res.stdout});
-        return Error.InvalidFbs;
-    }
-
-    const bfbs_fname = try std.fmt.allocPrint(allocator, "{s}.bfbs", .{std.fs.path.basename(fname[0 .. fname.len - 4])});
-    defer allocator.free(bfbs_fname);
-
-    std.debug.print("bfbs {s}\n", .{bfbs_fname});
-    const file = try std.fs.cwd().openFile(bfbs_fname, .{});
-    defer file.close();
-    const res = try file.readToEndAlloc(allocator, std.math.maxInt(u32));
-
-    // try std.fs.cwd().deleteFile(bfbs_fname);
-    return res;
-}
 
 fn fatal(msg: []const u8) []const u8 {
     std.debug.print("{s}\n", .{msg});
@@ -63,14 +21,18 @@ fn walk(opts: codegen.Options) !void {
     while (try walker.next()) |d| {
         if (!std.mem.endsWith(u8, d.path, ".fbs")) continue;
 
-        const full_path = try std.fmt.allocPrint(allocator, "{s}{c}{s}", .{ opts.input_dir, std.fs.path.sep, d.path });
-        defer allocator.free(full_path);
+        const fbs_path = try std.fmt.allocPrint(allocator, "{s}{c}{s}", .{
+            opts.input_dir,
+            std.fs.path.sep,
+            d.path,
+        });
+        defer allocator.free(fbs_path);
 
-        const genned_bytes = try bfbs(allocator, opts.input_dir, full_path);
+        const genned_bytes = try bfbs(allocator, opts.input_dir, fbs_path);
         defer allocator.free(genned_bytes);
-        std.debug.print("genned {d} bytes\n", .{genned_bytes.len});
+        // std.debug.print("genned {d} bytes\n", .{genned_bytes.len});
 
-        try codegen.codegen(allocator, full_path, genned_bytes, opts);
+        try codegen.codegen(allocator, fbs_path, genned_bytes, opts);
     }
 }
 
@@ -81,6 +43,7 @@ pub fn main() !void {
         \\-i, --input-dir <str>   Directory with .fbs files to generate code for
         \\-e, --extension <str>   Extension for output files (default .zig)
         \\-m, --module-name <str> Name of flatbuffers module (default flatbuffers)
+        \\-s, --single-file       Write code to single file (default false)
         \\
     );
     var diag = clap.Diagnostic{};
@@ -99,11 +62,17 @@ pub fn main() !void {
     const output_dir = res.args.@"output-dir" orelse fatal("Missing argument `--output-dir`");
     const module_name = res.args.@"module-name" orelse "flatbuffers";
     const extension = res.args.extension orelse ".zig";
+    const single_file = res.args.@"single-file" != 0;
 
     try walk(codegen.Options{
         .extension = extension,
         .input_dir = input_dir,
         .output_dir = output_dir,
         .module_name = module_name,
+        .single_file = single_file,
     });
+}
+
+test {
+    _ = @import("./codegen/codegen.zig");
 }

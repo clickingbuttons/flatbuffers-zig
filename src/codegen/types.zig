@@ -16,6 +16,7 @@ pub const Options = struct {
     input_dir: []const u8,
     output_dir: []const u8,
     module_name: []const u8,
+    single_file: bool,
 };
 
 pub const Prelude = struct {

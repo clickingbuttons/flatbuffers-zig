@@ -21,9 +21,7 @@ fn buildLib(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mo
         .target = target,
         .optimize = optimize,
     });
-    const test_step = b.step("test", "Run library tests");
     const run_main_tests = b.addRunArtifact(tests);
-    test_step.dependOn(&run_main_tests.step);
 
     const example_tests = b.addTest(.{
         .root_source_file = .{ .path = "./examples/monster/test.zig" },
@@ -31,15 +29,17 @@ fn buildLib(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mo
         .optimize = optimize,
     });
     example_tests.addModule(name, module);
-    const example_test_step = b.step("example", "Run example tests");
     const run_example_tests = b.addRunArtifact(example_tests);
-    example_test_step.dependOn(&run_example_tests.step);
+
+    const test_step = b.step("test", "Run library and example tests");
+    test_step.dependOn(&run_main_tests.step);
+    test_step.dependOn(&run_example_tests.step);
 
     return module;
 }
 
 fn buildExe(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mode, module: *std.Build.Module) void {
-    const flatbuffers_dep = b.dependency("flatbuffers", .{
+    const flatbuffers_dep = b.dependency(name, .{
         .target = target,
         .optimize = optimize,
     });
@@ -72,6 +72,18 @@ fn buildExe(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mo
     if (b.args) |args| run_cmd.addArgs(args);
     const run_step = b.step("run", "Run flatc-zig");
     run_step.dependOn(&run_cmd.step);
+
+    const codegen_tests = b.addTest(.{
+        .root_source_file = .{ .path = "./src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    codegen_tests.addModule(name, module);
+    codegen_tests.addOptions("build_options", build_options);
+    const run_codegen_tests = b.addRunArtifact(codegen_tests);
+
+    const test_step = b.step("test-exe", "Run codegen tests");
+    test_step.dependOn(&run_codegen_tests.step);
 }
 
 pub fn build(b: *std.Build) void {
