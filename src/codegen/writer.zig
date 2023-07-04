@@ -253,7 +253,7 @@ pub const CodeWriter = struct {
     fn writeComment(self: *Self, obj: anytype) !void {
         if (self.opts.documentation) {
             const writer = self.buffer.writer();
-            for (obj.documentation) |d| try writer.print("\n/// {s}", .{d});
+            for (obj.documentation) |d| try writer.print("\n///{s}", .{d});
         }
     }
 
