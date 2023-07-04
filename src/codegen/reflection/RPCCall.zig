@@ -7,6 +7,7 @@ pub const RPCCall = struct {
     request: types.Object,
     response: types.Object,
     attributes: []types.KeyValue,
+    documentation: [][:0]const u8,
 
     const Self = @This();
 
@@ -16,16 +17,18 @@ pub const RPCCall = struct {
             .request = try types.Object.init(allocator, try packed_.request()),
             .response = try types.Object.init(allocator, try packed_.response()),
             .attributes = try flatbuffers.unpackVector(allocator, types.KeyValue, packed_, "attributes"),
+            .documentation = try flatbuffers.unpackVector(allocator, [:0]const u8, packed_, "documentation"),
         };
     }
 
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
         allocator.free(self.attributes);
+        allocator.free(self.documentation);
     }
 
     pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
         const field_offsets = .{
-            .documentation = try builder.prependVector([:0]const u8, self.documentation),
+            .documentation = try builder.prependVectorOffsets([:0]const u8, self.documentation),
             .name = try builder.prependString(self.name),
             .attributes = try builder.prependVectorOffsets(types.KeyValue, self.attributes),
         };
@@ -68,7 +71,10 @@ pub const PackedRPCCall = struct {
         return self.table.readFieldVectorItem(types.PackedKeyValue, 3, index);
     }
 
-    pub fn documentation(self: Self) ![]align(1) [:0]const u8 {
-        return self.table.readField([]align(1) [:0]const u8, 4);
+    pub fn documentationLen(self: Self) !u32 {
+        return self.table.readFieldVectorLen(4);
+    }
+    pub fn documentation(self: Self, index: usize) ![:0]const u8 {
+        return self.table.readFieldVectorItem([:0]const u8, 4, index);
     }
 };

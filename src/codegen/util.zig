@@ -7,11 +7,6 @@ pub const Arg = struct {
     type: []const u8,
 };
 
-pub fn writeComment(writer: anytype, e: anytype, doc_comment: bool) !void {
-    const prefix = if (doc_comment) "///" else "//";
-    for (0..try e.documentationLen()) |i| try writer.print("\n{s}{s}", .{ prefix, try e.documentation(i) });
-}
-
 inline fn isWordBoundary(c: u8) bool {
     return switch (c) {
         '_', '-', ' ', '.' => true,

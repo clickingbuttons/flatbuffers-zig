@@ -56,4 +56,11 @@ pub const BaseType = enum(i8) {
             .utype, .vector, .obj, .@"union", .array => "invalid scalar",
         };
     }
+
+    pub fn size(self: Self) usize {
+        return switch (self) {
+            inline else => |t| @sizeOf(t.ToType()),
+            .utype, .vector, .obj, .@"union", .array => 0,
+        };
+    }
 };

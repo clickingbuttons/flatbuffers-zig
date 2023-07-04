@@ -6,6 +6,8 @@ pub const Service = struct {
     name: [:0]const u8,
     calls: []types.RPCCall,
     attributes: []types.KeyValue,
+    documentation: [][:0]const u8,
+    /// File that this Service is declared in.
     declaration_file: [:0]const u8,
 
     const Self = @This();
@@ -15,6 +17,7 @@ pub const Service = struct {
             .name = try packed_.name(),
             .calls = try flatbuffers.unpackVector(allocator, types.RPCCall, packed_, "calls"),
             .attributes = try flatbuffers.unpackVector(allocator, types.KeyValue, packed_, "attributes"),
+            .documentation = try flatbuffers.unpackVector(allocator, [:0]const u8, packed_, "documentation"),
             .declaration_file = try packed_.declarationFile(),
         };
     }
@@ -23,11 +26,12 @@ pub const Service = struct {
         for (self.calls) |c| c.deinit(allocator);
         allocator.free(self.calls);
         allocator.free(self.attributes);
+        allocator.free(self.documentation);
     }
 
     pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
         const field_offsets = .{
-            .documentation = try builder.prependVector([:0]const u8, self.documentation),
+            .documentation = try builder.prependVectorOffsets([:0]const u8, self.documentation),
             .name = try builder.prependString(self.name),
             .attributes = try builder.prependVectorOffsets(types.KeyValue, self.attributes),
             .calls = try builder.prependVectorOffsets(types.RPCCall, self.calls),
@@ -71,10 +75,14 @@ pub const PackedService = struct {
         return self.table.readFieldVectorItem(types.PackedKeyValue, 2, index);
     }
 
-    pub fn documentation(self: Self) ![]align(1) [:0]const u8 {
-        return self.table.readField([]align(1) [:0]const u8, 3);
+    pub fn documentationLen(self: Self) !u32 {
+        return self.table.readFieldVectorLen(3);
+    }
+    pub fn documentation(self: Self, index: usize) ![:0]const u8 {
+        return self.table.readFieldVectorItem([:0]const u8, 3, index);
     }
 
+    /// File that this Service is declared in.
     pub fn declarationFile(self: Self) ![:0]const u8 {
         return self.table.readField([:0]const u8, 4);
     }

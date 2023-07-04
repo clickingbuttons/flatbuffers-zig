@@ -6,6 +6,7 @@ pub const EnumVal = struct {
     name: [:0]const u8,
     value: i64 = 0,
     union_type: ?types.Type = null,
+    documentation: [][:0]const u8,
     attributes: []types.KeyValue,
 
     const Self = @This();
@@ -15,17 +16,19 @@ pub const EnumVal = struct {
             .name = try packed_.name(),
             .value = try packed_.value(),
             .union_type = if (try packed_.unionType()) |u| try types.Type.init(u) else null,
+            .documentation = try flatbuffers.unpackVector(allocator, [:0]const u8, packed_, "documentation"),
             .attributes = try flatbuffers.unpackVector(allocator, types.KeyValue, packed_, "attributes"),
         };
     }
 
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+        allocator.free(self.documentation);
         allocator.free(self.attributes);
     }
 
     pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
         const field_offsets = .{
-            .documentation = try builder.prependVector([:0]const u8, self.documentation),
+            .documentation = try builder.prependVectorOffsets([:0]const u8, self.documentation),
             .name = try builder.prependString(self.name),
             .attributes = try builder.prependVectorOffsets(types.KeyValue, self.attributes),
         };
@@ -62,8 +65,11 @@ pub const PackedEnumVal = struct {
         return self.table.readField(?types.PackedType, 3);
     }
 
-    pub fn documentation(self: Self) ![]align(1) [:0]const u8 {
-        return self.table.readField([]align(1) [:0]const u8, 4);
+    pub fn documentationLen(self: Self) !u32 {
+        return self.table.readFieldVectorLen(4);
+    }
+    pub fn documentation(self: Self, index: usize) ![:0]const u8 {
+        return self.table.readFieldVectorItem([:0]const u8, 4, index);
     }
 
     pub fn attributesLen(self: Self) !u32 {

@@ -6,8 +6,9 @@ pub const Enum = struct {
     name: [:0]const u8,
     values: []types.EnumVal,
     is_union: bool = false,
-    underlying_type: types.Type = .{},
+    underlying_type: types.Type,
     attributes: []types.KeyValue,
+    documentation: [][:0]const u8,
     declaration_file: [:0]const u8,
 
     const Self = @This();
@@ -19,6 +20,7 @@ pub const Enum = struct {
             .is_union = try packed_.isUnion(),
             .underlying_type = try types.Type.init(try packed_.underlyingType()),
             .attributes = try flatbuffers.unpackVector(allocator, types.KeyValue, packed_, "attributes"),
+            .documentation = try flatbuffers.unpackVector(allocator, [:0]const u8, packed_, "documentation"),
             .declaration_file = try packed_.declarationFile(),
         };
     }
@@ -27,6 +29,7 @@ pub const Enum = struct {
         for (self.values) |v| v.deinit(allocator);
         allocator.free(self.values);
         allocator.free(self.attributes);
+        allocator.free(self.documentation);
     }
 
     pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
@@ -34,7 +37,7 @@ pub const Enum = struct {
             .values = try builder.prependVectorOffsets(types.EnumVal, self.values),
             .name = try builder.prependString(self.name),
             .attributes = try builder.prependVectorOffsets(types.KeyValue, self.attributes),
-            .documentation = try builder.prependVector([:0]const u8, self.documentation),
+            .documentation = try builder.prependVectorOffsets([:0]const u8, self.documentation),
             .declaration_file = try builder.prependString(self.declaration_file),
         };
 
@@ -95,8 +98,11 @@ pub const PackedEnum = struct {
         return self.table.readFieldVectorItem(types.PackedKeyValue, 4, index);
     }
 
-    pub fn documentation(self: Self) ![]align(1) [:0]const u8 {
-        return self.table.readField([]align(1) [:0]const u8, 5);
+    pub fn documentationLen(self: Self) !u32 {
+        return self.table.readFieldVectorLen(5);
+    }
+    pub fn documentation(self: Self, index: usize) ![:0]const u8 {
+        return self.table.readFieldVectorItem([:0]const u8, 5, index);
     }
 
     pub fn declarationFile(self: Self) ![:0]const u8 {

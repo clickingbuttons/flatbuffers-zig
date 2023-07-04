@@ -1,18 +1,21 @@
 - [x] arrays
 - [x] packing/unpacking
 - [x] safety
-- [ ] codegen
+- [x] codegen
 	- [x] generate .bfbs (make flatc fork)
 	- [x] handwrite reflection.zig
 	- [x] hook up
-	- [ ] bug squash
+	- [x] bug squash
 		- [x] add `=  default` to struct fields
 		- [x] use readFieldWithDefault
 		- [x] fix @import("lib name")
 		- [x] don't create deinit if no fields make allocations
 		- [x] don't pass allocator if no fields make allocations
 		- [x] required
-		- [ ]  fix deinit !void to void
+		- [x]  fix deinit !void to void
+		- [x] fix deinit calling children deinit
+		- [x] documentation
+		- [x] default bit packed union
 options:
 - [ ] casing for function names
 - [ ] setters

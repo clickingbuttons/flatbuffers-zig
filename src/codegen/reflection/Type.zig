@@ -117,6 +117,7 @@ pub const Type = struct {
     pub fn isIndirect(self: Self, schema: types.Schema) !bool {
         if (self.base_type == .vector) {
             if (try self.child(schema)) |c| {
+                if (c.type().base_type == .string) return true;
                 if (!c.type().base_type.isScalar()) return !c.isStruct();
             }
         }
@@ -126,6 +127,7 @@ pub const Type = struct {
     pub fn isAllocated(self: Self, schema: types.Schema) !bool {
         if (self.base_type == .vector) {
             if (try self.child(schema)) |c| {
+                if (c.type().base_type == .string) return true;
                 if (!c.type().base_type.isScalar()) return true;
             }
         }

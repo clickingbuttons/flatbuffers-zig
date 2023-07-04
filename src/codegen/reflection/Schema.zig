@@ -9,7 +9,7 @@ pub const Schema = struct {
     file_ext: [:0]const u8,
     root_table: ?types.Object = null,
     services: []types.Service,
-    advanced_features: types.AdvancedFeatures = types.AdvancedFeatures{},
+    advanced_features: types.AdvancedFeatures = .{},
     fbs_files: []types.SchemaFile,
 
     const Self = @This();
@@ -103,7 +103,7 @@ pub const PackedSchema = struct {
     }
 
     pub fn advancedFeatures(self: Self) !types.AdvancedFeatures {
-        return self.table.readFieldWithDefault(types.AdvancedFeatures, 6, types.AdvancedFeatures{});
+        return self.table.readFieldWithDefault(types.AdvancedFeatures, 6, .{});
     }
 
     pub fn fbsFilesLen(self: Self) !u32 {

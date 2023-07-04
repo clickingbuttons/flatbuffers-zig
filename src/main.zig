@@ -44,6 +44,7 @@ pub fn main() !void {
         \\-e, --extension <str>   Extension for output files (default .zig)
         \\-m, --module-name <str> Name of flatbuffers module (default flatbuffers)
         \\-s, --single-file       Write code to single file (default false)
+        \\-d, --no-documentation  Don't include documentation comments (default false)
         \\
     );
     var diag = clap.Diagnostic{};
@@ -63,6 +64,7 @@ pub fn main() !void {
     const module_name = res.args.@"module-name" orelse "flatbuffers";
     const extension = res.args.extension orelse ".zig";
     const single_file = res.args.@"single-file" != 0;
+    const documentation = res.args.@"no-documentation" != 0;
 
     try walk(codegen.Options{
         .extension = extension,
@@ -70,6 +72,7 @@ pub fn main() !void {
         .output_dir = output_dir,
         .module_name = module_name,
         .single_file = single_file,
+        .documentation = documentation,
     });
 }
 

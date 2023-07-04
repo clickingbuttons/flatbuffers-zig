@@ -16,11 +16,15 @@ pub fn unpackVector(
     var res = try allocator.alloc(T, len);
     errdefer allocator.free(res);
     const getter = @field(PackedT, getter_name);
-    const has_allocator = @typeInfo(@TypeOf(T.init)).Fn.params.len == 2;
-    for (res, 0..) |*r, i| r.* = if (has_allocator)
-        try T.init(allocator, try getter(packed_, @intCast(u32, i)))
-    else
-        try T.init(try getter(packed_, @intCast(u32, i)));
+    if (@typeInfo(T) == .Struct) {
+        const has_allocator = @typeInfo(@TypeOf(T.init)).Fn.params.len == 2;
+        for (res, 0..) |*r, i| r.* = if (has_allocator)
+            try T.init(allocator, try getter(packed_, @intCast(u32, i)))
+        else
+            try T.init(try getter(packed_, @intCast(u32, i)));
+    } else {
+        for (res, 0..) |*r, i| r.* = try getter(packed_, @intCast(u32, i));
+    }
     return res;
 }
 

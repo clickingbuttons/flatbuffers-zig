@@ -14,11 +14,11 @@ pub fn bfbs(allocator: Allocator, include: []const u8, fname: []const u8) ![]con
     defer argv.deinit();
     try argv.appendSlice(&.{
         build_options.flatc_exe_path,
+        "--binary",
         "--schema",
         "--bfbs-comments",
         "--bfbs-builtins",
         "--bfbs-gen-embed",
-        "--binary",
     });
     if (include.len > 0) {
         try argv.appendSlice(&.{

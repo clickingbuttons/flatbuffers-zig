@@ -9,6 +9,8 @@ pub const Object = struct {
     minalign: i32 = 0,
     bytesize: i32 = 0,
     attributes: []types.KeyValue,
+    documentation: [][:0]const u8,
+    /// File that this Object is declared in.
     declaration_file: [:0]const u8,
 
     const Self = @This();
@@ -21,6 +23,7 @@ pub const Object = struct {
             .minalign = try packed_.minalign(),
             .bytesize = try packed_.bytesize(),
             .attributes = try flatbuffers.unpackVector(allocator, types.KeyValue, packed_, "attributes"),
+            .documentation = try flatbuffers.unpackVector(allocator, [:0]const u8, packed_, "documentation"),
             .declaration_file = try packed_.declarationFile(),
         };
     }
@@ -29,12 +32,13 @@ pub const Object = struct {
         for (self.fields) |f| f.deinit(allocator);
         allocator.free(self.fields);
         allocator.free(self.attributes);
+        allocator.free(self.documentation);
     }
 
     pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
         const field_offsets = .{
             .fields = try builder.prependVectorOffsets(types.Field, self.fields),
-            .documentation = try builder.prependVector([:0]const u8, self.documentation),
+            .documentation = try builder.prependVectorOffsets([:0]const u8, self.documentation),
             .name = try builder.prependString(self.name),
             .attributes = try builder.prependVectorOffsets(types.KeyValue, self.attributes),
             .declaration_file = try builder.prependString(self.declaration_file),
@@ -96,10 +100,14 @@ pub const PackedObject = struct {
         return self.table.readFieldVectorItem(types.PackedKeyValue, 5, index);
     }
 
-    pub fn documentation(self: Self) ![]align(1) [:0]const u8 {
-        return self.table.readField([]align(1) [:0]const u8, 6);
+    pub fn documentationLen(self: Self) !u32 {
+        return self.table.readFieldVectorLen(6);
+    }
+    pub fn documentation(self: Self, index: usize) ![:0]const u8 {
+        return self.table.readFieldVectorItem([:0]const u8, 6, index);
     }
 
+    /// File that this Object is declared in.
     pub fn declarationFile(self: Self) ![:0]const u8 {
         return self.table.readField([:0]const u8, 7);
     }

@@ -20,7 +20,7 @@ pub const Monster = struct {
 
     pub fn init(allocator: std.mem.Allocator, packed_: PackedMonster) !Self {
         return .{
-            .pos = try packed_.pos(),
+            .pos = if (try packed_.pos()) |p| try types.Vec3.init(p) else null,
             .mana = try packed_.mana(),
             .hp = try packed_.hp(),
             .name = try packed_.name(),
@@ -29,11 +29,11 @@ pub const Monster = struct {
             .weapons = try flatbuffers.unpackVector(allocator, types.Weapon, packed_, "weapons"),
             .equipped = try packed_.equipped(),
             .path = try flatbuffers.unpackArray(allocator, types.Vec3, try packed_.path()),
-            .rotation = try packed_.rotation(),
+            .rotation = if (try packed_.rotation()) |r| try types.Vec4.init(r) else null,
         };
     }
 
-    pub fn deinit(self: Self, allocator: std.mem.Allocator) !void {
+    pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
         allocator.free(self.weapons);
         allocator.free(self.path);
     }
@@ -56,7 +56,7 @@ pub const Monster = struct {
         try builder.appendTableFieldOffset(field_offsets.inventory);
         try builder.appendTableField(types.Color, self.color);
         try builder.appendTableFieldOffset(field_offsets.weapons);
-        try builder.appendTableField(types.PackedEquipment.Tag, self.equipped_type);
+        try builder.appendTableField(types.Equipment.Tag, self.equipped_type);
         try builder.appendTableFieldOffset(field_offsets.equipped);
         try builder.appendTableFieldOffset(field_offsets.path);
         try builder.appendTableField(?types.Vec4, self.rotation);
@@ -73,8 +73,8 @@ pub const PackedMonster = struct {
         return .{ .table = try flatbuffers.Table.init(size_prefixed_bytes) };
     }
 
-    pub fn pos(self: Self) !?types.Vec3 {
-        return self.table.readField(?types.Vec3, 0);
+    pub fn pos(self: Self) !?types.PackedVec3 {
+        return self.table.readField(?types.PackedVec3, 0);
     }
 
     pub fn mana(self: Self) !i16 {
@@ -100,18 +100,18 @@ pub const PackedMonster = struct {
     pub fn weaponsLen(self: Self) !u32 {
         return self.table.readFieldVectorLen(7);
     }
-    pub fn weapons(self: Self, index: usize) !types.Weapon {
-        return self.table.readFieldVectorItem(types.Weapon, 7, index);
+    pub fn weapons(self: Self, index: usize) !types.PackedWeapon {
+        return self.table.readFieldVectorItem(types.PackedWeapon, 7, index);
     }
 
-    pub fn equippedType(self: Self) !types.PackedEquipment.Tag {
-        return self.table.readFieldWithDefault(types.PackedEquipment.Tag, 8, @intToEnum(types.PackedEquipment.Tag, 0));
+    pub fn equippedType(self: Self) !types.Equipment.Tag {
+        return self.table.readFieldWithDefault(types.Equipment.Tag, 8, @intToEnum(types.Equipment.Tag, 0));
     }
 
-    pub fn equipped(self: Self) !types.Equipment {
+    pub fn equipped(self: Self) !types.PackedEquipment {
         return switch (try self.equippedType()) {
             inline else => |t| {
-                var result = @unionInit(types.Equipment, @tagName(t), undefined);
+                var result = @unionInit(types.PackedEquipment, @tagName(t), undefined);
                 const field = &@field(result, @tagName(t));
                 field.* = try self.table.readField(@TypeOf(field.*), 9);
                 return result;
@@ -119,11 +119,11 @@ pub const PackedMonster = struct {
         };
     }
 
-    pub fn path(self: Self) ![]align(1) types.Vec3 {
-        return self.table.readField([]align(1) types.Vec3, 10);
+    pub fn path(self: Self) ![]align(1) types.PackedVec3 {
+        return self.table.readField([]align(1) types.PackedVec3, 10);
     }
 
-    pub fn rotation(self: Self) !?types.Vec4 {
-        return self.table.readField(?types.Vec4, 11);
+    pub fn rotation(self: Self) !?types.PackedVec4 {
+        return self.table.readField(?types.PackedVec4, 11);
     }
 };

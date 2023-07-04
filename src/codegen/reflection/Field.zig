@@ -4,7 +4,7 @@ const types = @import("lib.zig");
 
 pub const Field = struct {
     name: [:0]const u8,
-    type: types.Type = .{},
+    type: types.Type,
     id: u16 = 0,
     offset: u16 = 0,
     default_integer: i64 = 0,
@@ -13,6 +13,7 @@ pub const Field = struct {
     required: bool = false,
     key: bool = false,
     attributes: []types.KeyValue,
+    documentation: [][:0]const u8,
     optional: bool = false,
     padding: u16 = 0,
 
@@ -30,6 +31,7 @@ pub const Field = struct {
             .required = try packed_.required(),
             .key = try packed_.key(),
             .attributes = try flatbuffers.unpackVector(allocator, types.KeyValue, packed_, "attributes"),
+            .documentation = try flatbuffers.unpackVector(allocator, [:0]const u8, packed_, "documentation"),
             .optional = try packed_.optional(),
             .padding = try packed_.padding(),
         };
@@ -37,11 +39,12 @@ pub const Field = struct {
 
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
         allocator.free(self.attributes);
+        allocator.free(self.documentation);
     }
 
     pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
         const field_offsets = .{
-            .documentation = try builder.prependVector([:0]const u8, self.documentation),
+            .documentation = try builder.prependVectorOffsets([:0]const u8, self.documentation),
             .name = try builder.prependString(self.name),
             .attributes = try builder.prependVectorOffsets(types.KeyValue, self.attributes),
         };
@@ -121,8 +124,11 @@ pub const PackedField = struct {
         return self.table.readFieldVectorItem(types.PackedKeyValue, 9, index);
     }
 
-    pub fn documentation(self: Self) ![]align(1) [:0]const u8 {
-        return self.table.readField([]align(1) [:0]const u8, 10);
+    pub fn documentationLen(self: Self) !u32 {
+        return self.table.readFieldVectorLen(10);
+    }
+    pub fn documentation(self: Self, index: usize) ![:0]const u8 {
+        return self.table.readFieldVectorItem([:0]const u8, 10, index);
     }
 
     pub fn optional(self: Self) !bool {

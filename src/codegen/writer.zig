@@ -250,6 +250,13 @@ pub const CodeWriter = struct {
         return try self.getTmpName(prefixed);
     }
 
+    fn writeComment(self: *Self, obj: anytype) !void {
+        if (self.opts.documentation) {
+            const writer = self.buffer.writer();
+            for (obj.documentation) |d| try writer.print("\n/// {s}", .{d});
+        }
+    }
+
     fn writeFnSig(
         self: *Self,
         name: []const u8,
@@ -380,7 +387,7 @@ pub const CodeWriter = struct {
             var field_type = field.type;
             field_type.is_packed = is_packed;
             const typename = try self.getType(field_type);
-            // try writeComment(field, true);
+            try self.writeComment(field);
             if (is_packed) {
                 const getter_name = try self.getFunctionName(name);
                 // const setter_name = try self.getPrefixedFunctionName("set", try field.name());
@@ -405,7 +412,7 @@ pub const CodeWriter = struct {
                     \\
                     \\    {s}: {s}
                 , .{ name, typename });
-                if (!object.is_struct) {
+                if (!object.is_struct and !field.required) {
                     const default = try self.getDefault(field);
                     if (default.len > 0) try writer.print("= {s}", .{default});
                 }
@@ -420,24 +427,20 @@ pub const CodeWriter = struct {
         const default_int = field.default_integer;
 
         const res = switch (field.type.base_type) {
-            .utype => try self.allocPrint("@intToEnum({s}, {d})", .{
-                try self.getType(field.type),
-                default_int,
-            }),
             .bool => try self.allocPrint("{s}", .{
                 if (default_int == 0) "false" else "true",
             }),
-            .byte, .ubyte, .short, .ushort, .int, .uint, .long, .ulong =>
-            // Check for an enum in disguise.
-            if (try field.type.child(self.schema) != null) try std.fmt.allocPrint(
-                self.allocator,
-                "@intToEnum({s}, {d})",
-                .{ try self.getType(field.type), default_int },
-            ) else try std.fmt.allocPrint(
-                self.allocator,
-                "{d}",
-                .{default_int},
-            ),
+            .utype, .byte, .ubyte, .short, .ushort, .int, .uint, .long, .ulong => brk: {
+                // Check for an enum
+                if (try field.type.child(self.schema)) |child| {
+                    switch (child) {
+                        .@"enum" => |e| if (e.isBitFlags()) break :brk try self.allocPrint(".{{}}", .{}),
+                        else => |t| log.warn("scalar type {any} has non-enum child {any}", .{ t, child }),
+                    }
+                    break :brk try self.allocPrint("@intToEnum({s}, {d})", .{ try self.getType(field.type), default_int });
+                }
+                break :brk try self.allocPrint("{d}", .{default_int});
+            },
             .float, .double => |t| brk: {
                 const default = field.default_real;
                 const T = if (t == .float) "f32" else "f64";
@@ -665,13 +668,13 @@ pub const CodeWriter = struct {
                 } else {
                     try writer.print(
                         \\
-                        \\    .{s} = try {s}.init(try {s}.{s}({s})),
+                        \\    .{s} = try {s}.init({s} try {s}.{s}()),
                     , .{
                         field_name,
                         field_type,
+                        maybe_allocator_param,
                         args.items[1].name,
                         field_getter,
-                        maybe_allocator_param,
                     });
                 }
             } else {
@@ -757,7 +760,7 @@ pub const CodeWriter = struct {
     // Caller owns returned string
     fn writeObject(self: *Self, object: Object, comptime is_packed: bool) ![]const u8 {
         const writer = self.buffer.writer();
-        // try writeComment(object, true);
+        try self.writeComment(object);
         const type_name = try self.getTypeName(object.name, false);
         const packed_name = try self.getTypeName(object.name, true);
         const self_ident = self.ident_map.get("Self").?;
@@ -809,7 +812,7 @@ pub const CodeWriter = struct {
         const writer = self.buffer.writer();
         for (enum_.values) |enum_val| {
             const tag_name = try self.getTagName(enum_val.name);
-            // try writeComment(enum_val, true);
+            try self.writeComment(enum_val);
             if (enum_.is_union) {
                 if (enum_val.value == 0) {
                     try writer.print("\n\t{s},", .{tag_name});
@@ -820,10 +823,15 @@ pub const CodeWriter = struct {
                     try writer.print("\n\t{s}: {s},", .{ tag_name, typename });
                 }
             } else if (enum_.isBitFlags()) {
-                try writer.print("\n\t{s}: bool,", .{tag_name});
+                // TODO: use 1 << enum_val.value
+                try writer.print("\n\t{s}: bool = false,", .{tag_name});
             } else {
                 try writer.print("\n\t{s} = {},", .{ tag_name, enum_val.value });
             }
+        }
+        if (enum_.isBitFlags()) {
+            const n_padding_bits: usize = enum_.underlying_type.base_type.size() * 8 - enum_.values.len;
+            if (n_padding_bits > 0) try writer.print("\n_padding: u{d} = 0,", .{n_padding_bits});
         }
     }
 
@@ -880,7 +888,7 @@ pub const CodeWriter = struct {
         const packed_name = try self.getTypeName(enum_.name, true);
         const declaration = if (is_packed) packed_name else type_name;
         try writer.writeByte('\n');
-        // try writeComment(enum_, true);
+        try self.writeComment(enum_);
         try writer.print("\n\npub const {s} = ", .{declaration});
         if (enum_.is_union) {
             try writer.writeAll("union(");
