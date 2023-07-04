@@ -175,7 +175,6 @@ fn codegenBuf(allocator: Allocator, fbs: []const u8) ![]const u8 {
         .output_dir = "",
         .module_name = "flatbuffers",
         .single_file = true,
-        .documentation = true,
     };
     const bfbs = try bfbsBuffer(allocator, fbs);
     defer allocator.free(bfbs);

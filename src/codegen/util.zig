@@ -6,6 +6,21 @@ pub const Arg = struct {
     name: []const u8,
     type: []const u8,
 };
+pub const Case = enum {
+    title,
+    camel,
+    snake,
+
+    const Self = @This();
+
+    pub fn fromString(s: []const u8) ?Self {
+        inline for (@typeInfo(Self).Enum.fields) |f| {
+            if (std.mem.eql(u8, f.name, s)) return @field(Self, f.name);
+        }
+
+        return null;
+    }
+};
 
 inline fn isWordBoundary(c: u8) bool {
     return switch (c) {

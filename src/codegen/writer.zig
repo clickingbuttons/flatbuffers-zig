@@ -117,7 +117,12 @@ pub const CodeWriter = struct {
         var res = std.ArrayList(u8).init(self.allocator);
         defer res.deinit();
 
-        try util.toCamelCase(res.writer(), name);
+        switch (self.opts.function_case) {
+            .camel => try util.toCamelCase(res.writer(), name),
+            .snake => try util.toSnakeCase(res.writer(), name),
+            .title => try util.toTitleCase(res.writer(), name),
+        }
+
         return try self.getIdentifier(res.items);
     }
 

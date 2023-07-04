@@ -17,5 +17,5 @@
 		- [x] documentation
 		- [x] default bit packed union
 options:
-- [ ] casing for function names
+- [x] casing for function names
 - [ ] setters

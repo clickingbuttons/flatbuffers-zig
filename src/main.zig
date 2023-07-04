@@ -3,8 +3,9 @@ const clap = @import("clap");
 const build_options = @import("build_options");
 const bfbs = @import("./codegen/bfbs.zig").bfbs;
 const codegen = @import("./codegen/lib.zig");
+const Case = @import("./codegen/util.zig").Case;
 
-fn fatal(msg: []const u8) []const u8 {
+fn fatal(comptime T: type, msg: []const u8) T {
     std.debug.print("{s}\n", .{msg});
     std.os.exit(1);
     unreachable;
@@ -38,13 +39,14 @@ fn walk(opts: codegen.Options) !void {
 
 pub fn main() !void {
     const params = comptime clap.parseParamsComptime(
-        \\-h, --help              Display this help and exit
-        \\-o, --output-dir <str>  Code generation output path
-        \\-i, --input-dir <str>   Directory with .fbs files to generate code for
-        \\-e, --extension <str>   Extension for output files (default .zig)
-        \\-m, --module-name <str> Name of flatbuffers module (default flatbuffers)
-        \\-s, --single-file       Write code to single file (default false)
-        \\-d, --no-documentation  Don't include documentation comments (default false)
+        \\-h, --help                 Display this help and exit
+        \\-o, --output-dir <str>     Code generation output path
+        \\-i, --input-dir <str>      Directory with .fbs files to generate code for
+        \\-e, --extension <str>      Extension for output files (default .zig)
+        \\-m, --module-name <str>    Name of flatbuffers module (default flatbuffers)
+        \\-s, --single-file          Write code to single file (default false)
+        \\-d, --no-documentation     Don't include documentation comments (default false)
+        \\-f, --function-case <str>  Casing for function names (camel, snake, title) (default camel)
         \\
     );
     var diag = clap.Diagnostic{};
@@ -59,12 +61,13 @@ pub fn main() !void {
     if (res.args.help != 0)
         return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
 
-    const input_dir = res.args.@"input-dir" orelse fatal("Missing argument `--input-dir`");
-    const output_dir = res.args.@"output-dir" orelse fatal("Missing argument `--output-dir`");
+    const input_dir = res.args.@"input-dir" orelse fatal([]const u8, "Missing argument `--input-dir`");
+    const output_dir = res.args.@"output-dir" orelse fatal([]const u8, "Missing argument `--output-dir`");
     const module_name = res.args.@"module-name" orelse "flatbuffers";
     const extension = res.args.extension orelse ".zig";
     const single_file = res.args.@"single-file" != 0;
-    const documentation = res.args.@"no-documentation" != 0;
+    const documentation = res.args.@"no-documentation" == 0;
+    const function_case = Case.fromString(res.args.@"function-case" orelse "camel") orelse fatal(Case, "invalid function case");
 
     try walk(codegen.Options{
         .extension = extension,
@@ -73,6 +76,7 @@ pub fn main() !void {
         .module_name = module_name,
         .single_file = single_file,
         .documentation = documentation,
+        .function_case = function_case,
     });
 }
 
