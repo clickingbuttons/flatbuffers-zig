@@ -134,9 +134,10 @@ pub const Type = struct {
         return false;
     }
 
-    pub fn isPackable(self: Self) bool {
+    pub fn isPackable(self: Self, schema: types.Schema) bool {
         return switch (self.base_type) {
-            .obj, .@"union" => true,
+            .obj => if (try self.child(schema)) |c| !c.isStruct() else true,
+            .@"union", .utype => true,
             else => false,
         };
     }

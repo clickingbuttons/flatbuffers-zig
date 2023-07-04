@@ -202,7 +202,7 @@ pub const CodeWriter = struct {
                         _ = try self.putDeclaration(decl_name, mod_name.items);
                     }
 
-                    const is_packed = type_.is_packed and type_.isPackable();
+                    const is_packed = (t == .utype or type_.is_packed) and type_.isPackable(self.schema);
                     const typename = try self.getTypeName(child.name(), is_packed);
                     return self.allocPrint("{s}{s}{s}{s}{s}", .{
                         if (type_.is_optional and t != .@"union") "?" else "",
@@ -385,13 +385,12 @@ pub const CodeWriter = struct {
 
     fn writeObjectFields(self: *Self, object: Object, comptime is_packed: bool) !void {
         const writer = self.buffer.writer();
-        for (object.fields) |field| {
+        for (object.fields) |*field| {
             if (field.deprecated) continue;
+            field.type.is_packed = is_packed;
             const name = try self.getFieldName(field.name);
             const is_indirect = try field.type.isIndirect(self.schema);
-            var field_type = field.type;
-            field_type.is_packed = is_packed;
-            const typename = try self.getType(field_type);
+            const typename = try self.getType(field.type);
             try self.writeComment(field);
             if (is_packed) {
                 const getter_name = try self.getFunctionName(name);
@@ -399,17 +398,18 @@ pub const CodeWriter = struct {
 
                 try writer.writeByte('\n');
                 switch (field.type.base_type) {
-                    .utype, .bool, .byte, .ubyte, .short, .ushort, .int, .uint, .long, .ulong, .float, .double, .obj, .array, .string => try self.writeObjectFieldScalarFns(field, getter_name, typename),
+                    .utype, .bool, .byte, .ubyte, .short, .ushort, .int, .uint, .long, .ulong, .float, .double, .obj, .array, .string => try self.writeObjectFieldScalarFns(field.*, getter_name, typename),
                     .vector => {
                         if (is_indirect) {
-                            try self.writeObjectFieldVectorLenFn(field);
-                            try self.writeObjectFieldVectorFn(field, getter_name, typename);
+                            try self.writeObjectFieldVectorLenFn(field.*);
+                            try self.writeObjectFieldVectorFn(field.*, getter_name, typename);
                         } else {
                             const aligned_typename = try self.allocPrint("[]align(1) {s}", .{typename[2..]});
-                            try self.writeObjectFieldScalarFns(field, getter_name, aligned_typename);
+                            defer self.allocator.free(aligned_typename);
+                            try self.writeObjectFieldScalarFns(field.*, getter_name, aligned_typename);
                         }
                     },
-                    .@"union" => try self.writeObjectFieldUnionFn(field, getter_name, typename),
+                    .@"union" => try self.writeObjectFieldUnionFn(field.*, getter_name, typename),
                     else => {},
                 }
             } else if (field.type.base_type != .utype) {
@@ -418,7 +418,7 @@ pub const CodeWriter = struct {
                     \\    {s}: {s}
                 , .{ name, typename });
                 if (!object.is_struct and !field.required) {
-                    const default = try self.getDefault(field);
+                    const default = try self.getDefault(field.*);
                     if (default.len > 0) try writer.print("= {s}", .{default});
                 }
 
@@ -480,7 +480,12 @@ pub const CodeWriter = struct {
         args: []Arg,
         offsets_name: []const u8,
     ) !void {
-        const field_name = try self.getFieldName(field.name);
+        // Remove _type so union types can cast to their tag (in addition to their value)
+        const trimmed_name = if (field.type.base_type == .utype)
+            field.name[0 .. field.name.len - "_type".len]
+        else
+            field.name;
+        const field_name = try self.getFieldName(trimmed_name);
         const ty_name = try self.getType(field.type);
         const is_indirect = try field.type.isIndirect(self.schema);
         const is_offset = switch (field.type.base_type) {
@@ -650,7 +655,7 @@ pub const CodeWriter = struct {
                         field_getter,
                     });
                 }
-            } else if (field.type.base_type == .obj) {
+            } else if (field.type.base_type == .obj and !try field.isStruct(self.schema)) {
                 const child = (try field.type.child(self.schema)).?;
                 const child_allocated = switch (child) {
                     .object => |o| try self.hasAllocations(o),
@@ -682,6 +687,16 @@ pub const CodeWriter = struct {
                         field_getter,
                     });
                 }
+            } else if (field.type.base_type == .@"union") {
+                try writer.print(
+                    \\
+                    \\    .{s} = try {s}.init(try {s}.{s}()),
+                , .{
+                    field_name,
+                    field_type,
+                    args.items[1].name,
+                    field_getter,
+                });
             } else {
                 try writer.print(
                     \\

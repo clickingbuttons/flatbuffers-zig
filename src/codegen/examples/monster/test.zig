@@ -32,6 +32,10 @@ const example_monster = Monster{
         .{ .x = 4, .y = 5, .z = 6 },
     }),
     .rotation = Vec4{ .v = .{ 1, 2, 3, 4 } },
+    .friends = @constCast(&[_][:0]const u8{
+        "Shrek",
+        "Fiona",
+    }),
 };
 
 fn testPackedMonster(monster: PackedMonster) !void {
@@ -57,6 +61,10 @@ fn testPackedMonster(monster: PackedMonster) !void {
     try testing.expectEqual(Vec3{ .x = 1, .y = 2, .z = 3 }, path[0]);
     try testing.expectEqual(Vec3{ .x = 4, .y = 5, .z = 6 }, path[1]);
     try testing.expectEqual(Vec4{ .v = .{ 1, 2, 3, 4 } }, (try monster.rotation()).?);
+
+    try testing.expectEqual(@as(usize, 2), try monster.friendsLen());
+    try testing.expectEqualStrings(@as([:0]u8, @constCast(&"Shrek".*)), try monster.friends(0));
+    try testing.expectEqualStrings(@as([:0]u8, @constCast(&"Fiona".*)), try monster.friends(1));
 }
 
 test "build monster and read" {

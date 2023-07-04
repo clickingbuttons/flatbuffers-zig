@@ -70,6 +70,16 @@ pub const Field = struct {
         _ = context;
         return a.id < b.id;
     }
+
+    pub fn isStruct(self: Self, schema: types.Schema) !bool {
+        switch (self.type.base_type) {
+            .obj => {
+                const child = (try self.type.child(schema)).?;
+                return child.isStruct();
+            },
+            else => return false,
+        }
+    }
 };
 
 pub const PackedField = struct {

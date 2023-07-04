@@ -5,7 +5,7 @@
 	- [x] generate .bfbs (make flatc fork)
 	- [x] handwrite reflection.zig
 	- [x] hook up
-	- [x] bug squash
+	- [ ] bug squash
 		- [x] add `=  default` to struct fields
 		- [x] use readFieldWithDefault
 		- [x] fix @import("lib name")
@@ -16,6 +16,9 @@
 		- [x] fix deinit calling children deinit
 		- [x] documentation
 		- [x] default bit packed union
+		- [x] fix packing strings
+		- [x] fix monster codegen
+		- [ ] fix schema leaks (attributes)
 options:
 - [x] casing for function names
 - [ ] setters

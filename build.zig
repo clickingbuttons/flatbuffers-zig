@@ -24,7 +24,7 @@ fn buildLib(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mo
     const run_main_tests = b.addRunArtifact(tests);
 
     const example_tests = b.addTest(.{
-        .root_source_file = .{ .path = "./examples/monster/test.zig" },
+        .root_source_file = .{ .path = "./src/codegen/examples/lib.zig" },
         .target = target,
         .optimize = optimize,
     });

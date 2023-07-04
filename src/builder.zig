@@ -87,7 +87,10 @@ pub const Builder = struct {
         const allocator = self.buffer.allocator;
         var offsets = try allocator.alloc(u32, packable.len);
         defer allocator.free(offsets);
-        for (packable, 0..) |p, i| offsets[i] = try p.pack(self);
+        for (packable, 0..) |p, i| offsets[i] = if (T == [:0]const u8)
+            try self.prependString(p)
+        else
+            try p.pack(self);
         return self.prependOffsets(offsets);
     }
 
@@ -375,6 +378,10 @@ pub fn exampleMonster(allocator: Allocator) ![]u8 {
     const inventory = try builder.prependVector(u8, &[_]u8{ 1, 2, 3 });
     const weapons = try builder.prependOffsets(@constCast(&[_]Offset{ weapon0, weapon1 }));
     const path = try builder.prependVector(Vec3, &[_]Vec3{ .{ .x = 1, .y = 2, .z = 3 }, .{ .x = 4, .y = 5, .z = 6 } });
+    const friends = try builder.prependVectorOffsets([:0]const u8, @constCast(&[_][:0]const u8{
+        "Shrek",
+        "Fiona",
+    }));
 
     try builder.startTable();
     try builder.appendTableField(Vec3, .{ .x = 1, .y = 2, .z = 3 }); // field 0 (pos)
@@ -389,6 +396,7 @@ pub fn exampleMonster(allocator: Allocator) ![]u8 {
     try builder.appendTableFieldOffset(weapon0); // field 9 (equipment value)
     try builder.appendTableFieldOffset(path); // field 10 (path)
     try builder.appendTableField(Vec4, .{ .v = .{ 1, 2, 3, 4 } }); // field 11 (rotation)
+    try builder.appendTableFieldOffset(friends); // field 12 (friends)
     const root = try builder.endTable();
 
     return builder.finish(root);
@@ -397,84 +405,100 @@ pub fn exampleMonster(allocator: Allocator) ![]u8 {
 test "build monster" {
     // annotated to make debugging Table easier
     const bytes = try exampleMonster(testing.allocator);
+    var file = try std.fs.cwd().createFile("monster2.bfbs", .{});
+    defer file.close();
+    try file.writer().writeAll(bytes);
     defer testing.allocator.free(bytes);
     try testing.expectEqualSlices(u8, &[_]u8{
-        44, 0, 0, 0, // offset to root table
+        0x28, 0, 0, 0, // offset to root table
         0, 0, 0, 0, // padding
-        0, 0, 0, 0, // padding
-        0, 0, 0, 0, // padding
+        0, 0, // padding
         // header start
-        28, 0, // vtable len
-        68, 0, // table len
-        56, 0, // offset to field  0 from vtable start (pos)
-        54, 0, // offset to field  1 from vtable start (mana)
-        52, 0, // offset to field  2 from vtable start (hp)
-        48, 0, // offset to field  3 from vtable start (name)
+        0x1e, 0, // vtable len
+        0x54, 0, // table len
+        0x40, 0, // offset to field  0 from vtable start (pos)
+        0x3e, 0, // offset to field  1 from vtable start (mana)
+        0x3c, 0, // offset to field  2 from vtable start (hp)
+        0x38, 0, // offset to field  3 from vtable start (name)
         0, 0, //  offset to field  4 from vtable start (friendly)
-        44, 0, // offset to field  5 from vtable start (inventory)
-        43, 0, // offset to field  6 from vtable start (color)
-        36, 0, // offset to field  7 from vtable start (weapons)
-        35, 0, // offset to field  8 from vtable start (equipment type)
-        28, 0, // offset to field  9 from vtable start (equipment value)
-        24, 0, // offset to field 10 from vtable start (path)
-        4, 0, //  offset to field 11 from vtable start (rotation)
+        0x34, 0, // offset to field  5 from vtable start (inventory)
+        0x33, 0, // offset to field  6 from vtable start (color)
+        0x2c, 0, // offset to field  7 from vtable start (weapons)
+        0x2b, 0, // offset to field  8 from vtable start (equipment type)
+        0x24, 0, // offset to field  9 from vtable start (equipment value)
+        0x20, 0, // offset to field 10 from vtable start (path)
+        0x08, 0, //  offset to field 11 from vtable start (rotation)
+        0x04, 0, //  offset to field 12 from vtable start (friends)
         // vtable start (monster)
-        28, 0, 0, 0, // negative offset to start of vtable from here
+        0x1e, 0, 0, 0, // negative offset to start of vtable from here
+        0x50, 0, 0, 0, // field 11 offset from here (friends)
         0, 0, 0x80, 0x3F, // 1.0 ... field 11 (rotation)
         0, 0, 0x00, 0x40, // 2.0
         0, 0, 0x40, 0x40, // 3.0
         0, 0, 0x80, 0x40, // 4.0
         0, 0, 0, 0, // padding
-        44, 0, 0, 0, // field 10 offset from here (path)
-        132, 0, 0, 0, // field 9 offset from here (equipment value)
+        0, 0, 0, 0, // padding
+        0x58, 0, 0, 0, // field 10 offset from here (path)
+        0xb0, 0, 0, 0, // field 9 offset from here (equipment value)
         0, 0, 0, @enumToInt(Equipment.weapon), // field 8 (equipment type)
-        60, 0, 0, 0, // field 7 offset from here (weapons)
+        0x68, 0, 0, 0, // field 7 offset from here (weapons)
         0, 0, 0, @enumToInt(Color.green), // field 6 (color)
-        64, 0, 0, 0, // field 5 offset from here (inventory)
-        68, 0, 0, 0, // field 3 offset from here (name)
-        200, 0x00, // field 2 (hp)
-        100, 0x00, // field 1 (mana)
+        0x6c, 0, 0, 0, // field 5 offset from here (inventory)
+        0x70, 0, 0, 0, // field 3 offset from here (name)
+        0xc8, 0x00, // field 2 (hp)
+        0x64, 0x00, // field 1 (mana)
         0, 0, 0x80, 0x3F, // 1.0 ... field 0 (pos)
         0, 0, 0x00, 0x40, // 2.0
         0, 0, 0x40, 0x40, // 3.0
+        0, 0, 0, 0, // padding
+        0, 0, 0, 0, // padding
         // table start (monster)
-        2, 0, 0, 0, // path len
+        0x02, 0, 0, 0, // friends len
+        0x14, 0, 0, 0, // friends item 0 (offset to string from here)
+        0x04, 0, 0, 0, // friends item 1 (offset to string from here)
+        0x05, 0,   0,   0, // "Fiona".len
+        'F',  'i', 'o', 'n',
+        'a', 0, 0, 0, // padding
+        0x05, 0,   0,   0, // "Shrek".len
+        'S',  'h', 'r', 'e',
+        'k', 0, 0, 0, // padding
+        0x02, 0, 0, 0, // path len
         0, 0, 0x80, 0x3F, // 1.0 ... field 10 (path) item 0
         0, 0, 0x00, 0x40, // 2.0
         0, 0, 0x40, 0x40, // 2.0
         0, 0, 0x80, 0x40, // 4.0 ... field 10 (path) item 1
         0, 0, 0xA0, 0x40, // 5.0
         0, 0, 0xC0, 0x40, // 6.0
-        2, 0, 0, 0, // weapons len
-        60, 0, 0, 0, // weapons item 0 (offset to table from here)
-        28, 0, 0, 0, // weapons item 1 (offset to table from here)
-        3, 0, 0, 0, // inventory len
+        0x02, 0, 0, 0, // weapons len
+        0x3c, 0, 0, 0, // weapons item 0 (offset to table from here)
+        0x1c, 0, 0, 0, // weapons item 1 (offset to table from here)
+        0x03, 0, 0, 0, // inventory len
         1, 2, 3, 0, // inventory data
-        3, 0, 0, 0, // "orc".len
+        0x03, 0, 0, 0, // "orc".len
         'o', 'r', 'c', 0, // field 0 (name)
         // string
-        8, 0, // vtable len
-        12, 0, // table len
-        8, 0, // offset to field 0 from vtable start
-        6, 0, // offset to field 1 from vtable start
+        0x08, 0, // vtable len
+        0x0c, 0, // table len
+        0x08, 0, // offset to field 0 from vtable start
+        0x06, 0, // offset to field 1 from vtable start
         // vtable start (weapon1)
-        8, 0, 0, 0, // negative offset to start of vtable from here
+        0x08, 0, 0, 0, // negative offset to start of vtable from here
         0, 0, 23, 0, // field 1 (damage)
-        4, 0, 0, 0, // field 2 offset from here (name)
+        0x04, 0, 0, 0, // field 2 offset from here (name)
         // table start (weapon1)
         3, 0, 0, 0, // "axe".len
         'a', 'x', 'e', 0, // field 0 (name)
         // string
-        8, 0, // vtable len
-        12, 0, // table len
-        8, 0, // offset to field 0 from vtable start
-        6, 0, // offset to field 1 from vtable start
+        0x08, 0, // vtable len
+        0x0c, 0, // table len
+        0x08, 0, // offset to field 0 from vtable start
+        0x06, 0, // offset to field 1 from vtable start
         // vtable start (weapon0)
-        8, 0, 0, 0, // negative offset to start of vtable from here
+        0x08, 0, 0, 0, // negative offset to start of vtable from here
         0, 0, 21, 0, // field 0 (damage)
-        4, 0, 0, 0, // field 1 offset from here (name)
+        0x04, 0, 0, 0, // field 1 offset from here (name)
         // table start (weapon0)
-        3, 0, 0, 0, // "sword".len
+        0x03, 0, 0, 0, // "sword".len
         's', 'a', 'w', 0, // field 0 (name)
         // string
     }, bytes);

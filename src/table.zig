@@ -40,7 +40,14 @@ pub const Table = struct {
     }
 
     fn checkedSlice(self: Self, offset: Offset, len: Offset) ![]u8 {
-        if (offset + len > self.flatbuffer.len) return Error.InvalidOffset;
+        if (offset + len > self.flatbuffer.len) {
+            log.err("offset {d} + len {d} > total flatbuffer len {d}", .{
+                offset,
+                len,
+                self.flatbuffer.len,
+            });
+            return Error.InvalidOffset;
+        }
         return self.flatbuffer[offset .. offset + len];
     }
 

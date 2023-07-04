@@ -3,3 +3,4 @@ zig-out
 .gdb_history
 *.bfbs
 *.afb
+tmp

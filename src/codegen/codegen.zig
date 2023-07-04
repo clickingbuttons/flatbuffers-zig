@@ -3,6 +3,7 @@ const writer_mod = @import("writer.zig");
 const types = @import("types.zig");
 const build_options = @import("build_options");
 const bfbsBuffer = @import("./bfbs.zig").bfbsBuffer;
+const Builder = @import("flatbuffers").Builder;
 
 const Allocator = std.mem.Allocator;
 const CodeWriter = writer_mod.CodeWriter;
@@ -131,6 +132,15 @@ pub fn codegen(
     const packed_schema = try PackedSchema.init(@constCast(bfbs_bytes));
     const schema = try Schema.init(allocator, packed_schema);
     defer schema.deinit(allocator);
+
+    // var builder = Builder.init(allocator);
+    // const root = try schema0.pack(&builder);
+    // const packed_bytes = try builder.finish(root);
+    // const repacked_schema = try PackedSchema.init(packed_bytes);
+
+    // const schema = try Schema.init(allocator, repacked_schema);
+    // defer schema.deinit(allocator);
+
     const basename = std.fs.path.basename(full_path);
     const no_ext = basename[0 .. basename.len - 4];
     const file_ident = try std.fmt.allocPrint(allocator, "//{s}.fbs", .{no_ext});
@@ -423,4 +433,14 @@ test "comments" {
         \\};
         \\
     , generated);
+}
+
+test "monster" {
+    const fbs = @embedFile("./examples/monster/monster.fbs");
+    const expected = @embedFile("./examples/monster/monster.zig");
+    const allocator = testing.allocator;
+    const generated = try codegenBuf(allocator, fbs);
+    defer allocator.free(generated);
+
+    try testing.expectEqualStrings(expected, generated);
 }
