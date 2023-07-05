@@ -3,7 +3,7 @@ pub const Builder = @import("./builder.zig").Builder;
 pub const exampleMonster = @import("./builder.zig").exampleMonster;
 pub const Table = @import("./table.zig").Table;
 
-pub const isPacked = Table.isPacked;
+pub const isScalar = Table.isScalar;
 
 pub fn hasAllocator(comptime T: type) bool {
     if (@typeInfo(T) == .Struct and @hasDecl(T, "init")) {
@@ -24,7 +24,7 @@ pub fn unpackVector(
 
     // 1. Vector of scalar (type has getter that returns align(1) slice)
     // We call this just to fix alignment.
-    if (comptime isPacked(T)) {
+    if (comptime isScalar(T)) {
         const arr = try getter(packed_);
         var res = try allocator.alloc(T, arr.len);
         for (0..arr.len) |i| res[i] = arr[i];

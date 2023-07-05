@@ -29,7 +29,7 @@ fn getFilename(allocator: Allocator, opts: Options, name: []const u8) ![]const u
     return try res.toOwnedSlice();
 }
 
-fn createFile(fname: []const u8) !std.fs.File {
+fn createFile(fname: []const u8, flags: std.fs.File.CreateFlags) !std.fs.File {
     if (std.fs.path.dirname(fname)) |dir| {
         std.fs.cwd().makePath(dir) catch |e| switch (e) {
             error.PathAlreadyExists => {},
@@ -40,7 +40,7 @@ fn createFile(fname: []const u8) !std.fs.File {
         };
     }
 
-    return try std.fs.cwd().createFile(fname, .{});
+    return try std.fs.cwd().createFile(fname, flags);
 }
 
 fn format(allocator: Allocator, fname: []const u8, code: [:0]const u8) ![]const u8 {
@@ -75,7 +75,7 @@ fn writeFiles(
     };
 
     const lib_fname = try getFilename(allocator, opts, "lib");
-    var lib_file = try createFile(lib_fname);
+    var lib_file = try createFile(lib_fname, .{ .truncate = false });
 
     for (objects_or_enums) |obj| {
         if (!obj.inFile(prelude.file_ident)) continue;
@@ -91,7 +91,7 @@ fn writeFiles(
         const code = try code_writer.finish(fname, true);
         defer allocator.free(code);
 
-        var file = try createFile(fname);
+        var file = try createFile(fname, .{});
         defer file.close();
         try file.writeAll(code);
 
@@ -160,7 +160,7 @@ pub fn codegen(
         const fname = try getFilename(allocator, opts, "lib");
         defer allocator.free(fname);
 
-        var file = try createFile(fname);
+        var file = try createFile(fname, .{});
         defer file.close();
 
         var code_writer = CodeWriter.init(allocator, schema, opts, 0, prelude);

@@ -405,12 +405,15 @@ pub fn exampleMonster(allocator: Allocator) ![]u8 {
 test "build monster" {
     // annotated to make debugging Table easier
     const bytes = try exampleMonster(testing.allocator);
-    // Flatc has a handly annotation tool for making this test:
-    // ../flatbuffers/zig-out/bin/flatc --annotate ./src/codegen/examples/monster/monster.fbs ./monster_data.bfbs
-    var file = try std.fs.cwd().createFile("monster_data.bfbs", .{});
-    defer file.close();
-    try file.writer().writeAll(bytes);
     defer testing.allocator.free(bytes);
+    // Flatc has a handly annotation tool for making this test. Just uncomment the lines below:
+    // var file = try std.fs.cwd().createFile("monster_data.bfbs", .{});
+    // defer file.close();
+    // try file.writer().writeAll(bytes);
+
+    // And run these commands:
+    // flatc --annotate ./src/codegen/examples/monster/monster.fbs ./monster_data.bfbs
+    // less monster_data.afb
     try testing.expectEqualSlices(u8, &[_]u8{
         // header
         0x2C, 0, 0, 0, // offset to root table `Monster`

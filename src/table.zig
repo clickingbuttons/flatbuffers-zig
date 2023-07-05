@@ -63,7 +63,7 @@ pub const Table = struct {
             else => T,
         };
 
-        if (comptime isPacked(Child)) {
+        if (comptime isScalar(Child)) {
             const bytes = try self.checkedSlice(offset_, @sizeOf(Child));
             const res = std.mem.bytesToValue(Child, bytes[0..@sizeOf(Child)]);
             return res;
@@ -128,17 +128,10 @@ pub const Table = struct {
         return vtable_[index];
     }
 
-    pub fn isPacked(comptime T: type) bool {
+    pub fn isScalar(comptime T: type) bool {
         return switch (@typeInfo(T)) {
             .Void, .Bool, .Int, .Float, .Array, .Enum => true,
             .Struct => |s| s.layout == .Extern or s.layout == .Packed,
-            else => false,
-        };
-    }
-
-    pub fn isScalar(comptime T: type) bool {
-        return switch (@typeInfo(T)) {
-            .Bool, .Int, .Float, .Array, .Enum => true,
             else => false,
         };
     }
@@ -186,7 +179,7 @@ pub const Table = struct {
         if (index >= len) return Error.InvalidIndex;
         offset += @sizeOf(Offset);
 
-        if (comptime isPacked(T)) {
+        if (comptime isScalar(T)) {
             offset += index * @sizeOf(T);
         } else {
             offset += index * @sizeOf(Offset);
@@ -202,10 +195,10 @@ test "isScalar" {
         y: f32,
         z: f32,
     };
-    try testing.expectEqual(true, Table.isPacked(u16));
-    try testing.expectEqual(true, Table.isPacked(Scalar));
-    try testing.expectEqual(true, Table.isPacked(void));
+    try testing.expectEqual(true, Table.isScalar(u16));
+    try testing.expectEqual(true, Table.isScalar(Scalar));
+    try testing.expectEqual(true, Table.isScalar(void));
     const NotScalar = struct { flatbuffer: Table };
-    try testing.expectEqual(false, Table.isPacked(NotScalar));
-    try testing.expectEqual(false, Table.isPacked([]u8));
+    try testing.expectEqual(false, Table.isScalar(NotScalar));
+    try testing.expectEqual(false, Table.isScalar([]u8));
 }

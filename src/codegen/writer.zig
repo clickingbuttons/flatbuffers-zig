@@ -67,7 +67,10 @@ pub const CodeWriter = struct {
         self.string_pool.deinit();
     }
 
+    // TODO: move string stuff into seperate struct. add getExclusiveX methods and call
+    // those here.
     fn initIdentMap(self: *Self, obj_or_enum: anytype) !void {
+        try self.ident_map.put("table", "table");
         const type_name = try self.getTypeName(obj_or_enum.name, false);
         const packed_name = try self.getTypeName(obj_or_enum.name, true);
         try self.ident_map.put(type_name, type_name);
@@ -76,10 +79,8 @@ pub const CodeWriter = struct {
             for (obj_or_enum.fields) |field| {
                 const field_name = try self.getFieldName(field.name);
                 const getter_name = try self.getFunctionName(field.name);
-                const setter_name = try self.getPrefixedFunctionName("set", field.name);
                 try self.ident_map.put(field_name, field_name);
                 try self.ident_map.put(getter_name, getter_name);
-                try self.ident_map.put(setter_name, setter_name);
             }
         }
         try self.ident_map.put("std", try self.getIdentifier("std"));
@@ -245,7 +246,7 @@ pub const CodeWriter = struct {
 
         while (self.ident_map.get(res.items)) |_| try res.append('_');
 
-        return self.string_pool.getOrPut(res.items);
+        return self.getIdentifier(res.items);
     }
 
     // This struct owns returned string.
@@ -348,16 +349,24 @@ pub const CodeWriter = struct {
         try self.writeFnSig(getter_name, true, typename, &args);
         try writer.print(
             \\
-            \\    return switch (try {s}.{s}()) {{
-            \\        inline else => |t| {{
-            \\            var result = @unionInit({s}, @tagName(t), undefined);
-            \\            const field = &@field(result, @tagName(t));
-            \\            field.* = try self.table.readField(@TypeOf(field.*), {d});
-            \\            return result;
+            \\    return switch (try {0s}.{1s}()) {{
+            \\        inline else => |{4s}| {{
+            \\            var {5s} = @unionInit({2s}, @tagName({4s}), undefined);
+            \\            const {6s} = &@field({5s}, @tagName({4s}));
+            \\            {6s}.* = try {0s}.table.readField(@TypeOf({6s}.*), {3d});
+            \\            return {5s};
             \\        }},
             \\    }};
             \\}}
-        , .{ args[0].name, tag_getter_name, typename, field.id });
+        , .{
+            args[0].name,
+            tag_getter_name,
+            typename,
+            field.id,
+            try self.getTmpName("tag"),
+            try self.getTmpName("result"),
+            try self.getTmpName("field"),
+        });
     }
 
     fn writeObjectFieldVectorFn(
@@ -974,16 +983,16 @@ pub const CodeWriter = struct {
         try writer.print(
             \\
             \\    switch ({0s}) {{
-            \\        inline else => |v| {{
-            \\            if (comptime {2s}.isPacked(@TypeOf(v))) {{
-            \\                try {1s}.prepend(v);
+            \\        inline else => |{3s}| {{
+            \\            if (comptime {2s}.isScalar(@TypeOf({3s}))) {{
+            \\                try {1s}.prepend({3s});
             \\                return {1s}.offset();
             \\            }}
-            \\            return try v.pack({1s});
+            \\            return try {3s}.pack({1s});
             \\        }},
             \\    }}
             \\}}
-        , .{ args[0].name, args[1].name, mod_name });
+        , .{ args[0].name, args[1].name, mod_name, try self.getTmpName("v") });
     }
 
     // Caller owns returned string

@@ -34,7 +34,7 @@ pub const Equipment = union(PackedEquipment.Tag) {
     pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
         switch (self) {
             inline else => |v| {
-                if (comptime flatbuffers.isPacked(@TypeOf(v))) {
+                if (comptime flatbuffers.isScalar(@TypeOf(v))) {
                     try builder.prepend(v);
                     return builder.offset();
                 }
@@ -159,9 +159,9 @@ pub const PackedMonster = struct {
 
     pub fn equipped(self: Self) !PackedEquipment {
         return switch (try self.equippedType()) {
-            inline else => |t| {
-                var result = @unionInit(PackedEquipment, @tagName(t), undefined);
-                const field = &@field(result, @tagName(t));
+            inline else => |tag| {
+                var result = @unionInit(PackedEquipment, @tagName(tag), undefined);
+                const field = &@field(result, @tagName(tag));
                 field.* = try self.table.readField(@TypeOf(field.*), 9);
                 return result;
             },
