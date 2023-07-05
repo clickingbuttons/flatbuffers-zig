@@ -71,7 +71,7 @@ pub const Monster = struct {
             .color = try packed_.color(),
             .weapons = try flatbuffers.unpackVector(allocator, Weapon, packed_, "weapons"),
             .equipped = try Equipment.init(try packed_.equipped()),
-            .path = try flatbuffers.unpackArray(allocator, Vec3, try packed_.path()),
+            .path = try flatbuffers.unpackVector(allocator, Vec3, packed_, "path"),
             .rotation = try packed_.rotation(),
             .friends = try flatbuffers.unpackVector(allocator, [:0]const u8, packed_, "friends"),
         };

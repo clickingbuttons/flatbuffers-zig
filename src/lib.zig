@@ -11,31 +11,35 @@ pub fn unpackVector(
     comptime getter_name: []const u8,
 ) ![]T {
     const PackedT = @TypeOf(packed_);
+    const getter = @field(PackedT, getter_name);
+    const info = @typeInfo(T);
+
+    // 1. Vector of scalar (type has getter that returns align(1) slice)
+    // We call this just to fix alignment.
+    if (info == .Struct and info.Struct.layout != .Auto) {
+        const arr = try getter(packed_);
+        var res = try allocator.alloc(T, arr.len);
+        for (0..arr.len) |i| res[i] = arr[i];
+        return res;
+    }
+
     const len_getter = @field(PackedT, getter_name ++ "Len");
     const len = try len_getter(packed_);
     var res = try allocator.alloc(T, len);
     errdefer allocator.free(res);
-    const getter = @field(PackedT, getter_name);
-    if (@typeInfo(T) == .Struct) {
+
+    if (@typeInfo(T) == .Struct and @hasDecl(T, "init")) {
         const has_allocator = @typeInfo(@TypeOf(T.init)).Fn.params.len == 2;
         for (res, 0..) |*r, i| r.* = if (has_allocator)
+            // 2. Vector of object (with allocations)
             try T.init(allocator, try getter(packed_, @intCast(u32, i)))
         else
+            // 3. Vector of object (no allocations)
             try T.init(try getter(packed_, @intCast(u32, i)));
     } else {
+        // 4. Vector of string (no allocations)
         for (res, 0..) |*r, i| r.* = try getter(packed_, @intCast(u32, i));
     }
-    return res;
-}
-
-/// Fixes alignment. Caller owns returned slice.
-pub fn unpackArray(
-    allocator: std.mem.Allocator,
-    comptime T: type,
-    arr: []align(1) T,
-) ![]T {
-    var res = try allocator.alloc(T, arr.len);
-    for (0..arr.len) |i| res[i] = arr[i];
     return res;
 }
 

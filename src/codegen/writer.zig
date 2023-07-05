@@ -191,7 +191,7 @@ pub const CodeWriter = struct {
                 }
             },
             else => |t| {
-                if (try type_.child(self.schema)) |child| {
+                if (type_.child(self.schema)) |child| {
                     var decl_name: []const u8 = "";
                     if (!self.opts.single_file) {
                         decl_name = try self.getTmpName("types");
@@ -389,7 +389,7 @@ pub const CodeWriter = struct {
             if (field.deprecated) continue;
             field.type.is_packed = is_packed;
             const name = try self.getFieldName(field.name);
-            const is_indirect = try field.type.isIndirect(self.schema);
+            const is_indirect = field.type.isIndirect(self.schema);
             const typename = try self.getType(field.type);
             try self.writeComment(field);
             if (is_packed) {
@@ -437,7 +437,7 @@ pub const CodeWriter = struct {
             }),
             .utype, .byte, .ubyte, .short, .ushort, .int, .uint, .long, .ulong => brk: {
                 // Check for an enum
-                if (try field.type.child(self.schema)) |child| {
+                if (field.type.child(self.schema)) |child| {
                     switch (child) {
                         .@"enum" => |e| if (e.isBitFlags()) break :brk try self.allocPrint(".{{}}", .{}),
                         else => |t| log.warn("scalar type {any} has non-enum child {any}", .{ t, child }),
@@ -487,7 +487,7 @@ pub const CodeWriter = struct {
             field.name;
         const field_name = try self.getFieldName(trimmed_name);
         const ty_name = try self.getType(field.type);
-        const is_indirect = try field.type.isIndirect(self.schema);
+        const is_indirect = field.type.isIndirect(self.schema);
         const is_offset = switch (field.type.base_type) {
             .obj => is_indirect,
             .string, .vector, .@"union" => true,
@@ -624,85 +624,69 @@ pub const CodeWriter = struct {
 
         for (object.fields) |field| {
             if (field.type.base_type == .utype or field.deprecated) continue;
+
             const field_name = try self.getFieldName(field.name);
             const field_type = try self.getType(field.type);
             const field_getter = try self.getFunctionName(field.name);
             const arg_index: usize = if (has_allocations) 1 else 0;
-            if (try field.type.isAllocated(self.schema)) {
-                const module_name = try self.putDeclaration(self.opts.module_name, self.opts.module_name);
-                if (try field.type.isIndirect(self.schema)) {
-                    try writer.print(
-                        \\
-                        \\    .{s} = try {s}.unpackVector({s}, {s}, {s}, "{s}"),
-                    , .{
-                        field_name,
-                        module_name,
-                        args.items[0].name,
-                        field_type[2..],
-                        args.items[1].name,
-                        field_getter,
-                    });
-                } else {
-                    try writer.print(
-                        \\
-                        \\    .{s} = try {s}.unpackArray({s}, {s}, try {s}.{s}()),
-                    , .{
-                        field_name,
-                        module_name,
-                        args.items[0].name,
-                        field_type[2..],
-                        args.items[1].name,
-                        field_getter,
-                    });
-                }
-            } else if (field.type.base_type == .obj and !try field.isStruct(self.schema)) {
-                const child = (try field.type.child(self.schema)).?;
-                const child_allocated = switch (child) {
-                    .object => |o| try self.hasAllocations(o),
-                    else => false,
-                };
-                const maybe_allocator_param = if (child_allocated) try self.allocPrint("{s}, ", .{args.items[0].name}) else try self.allocator.alloc(u8, 0);
-                defer self.allocator.free(maybe_allocator_param);
-                if (field.type.is_optional) {
-                    try writer.print(
-                        \\
-                        \\    .{0s} = if (try {1s}.{2s}()) |{3s}| try {4s}.init({5s}{3s}) else null,
-                    , .{
-                        field_name,
-                        args.items[arg_index].name,
-                        field_getter,
-                        try self.getTmpName(field_name[0..1]),
-                        field_type[1..],
-                        maybe_allocator_param,
-                    });
-                } else {
-                    try writer.print(
-                        \\
-                        \\    .{s} = try {s}.init({s} try {s}.{s}()),
-                    , .{
-                        field_name,
-                        field_type,
-                        maybe_allocator_param,
-                        args.items[1].name,
-                        field_getter,
-                    });
-                }
-            } else if (field.type.base_type == .@"union") {
-                try writer.print(
-                    \\
-                    \\    .{s} = try {s}.init(try {s}.{s}()),
-                , .{
-                    field_name,
-                    field_type,
-                    args.items[1].name,
-                    field_getter,
-                });
-            } else {
-                try writer.print(
-                    \\
-                    \\    .{s} = try {s}.{s}(),
-                , .{ field_name, args.items[arg_index].name, field_getter });
+
+            switch (field.type.base_type) {
+                .vector => |t| brk: {
+                    const module_name = try self.putDeclaration(self.opts.module_name, self.opts.module_name);
+                    if (t == .vector) {
+                        if (!field.type.isAllocated(self.schema)) break :brk;
+                        try writer.print(
+                            \\
+                            \\    .{s} = try {s}.unpackVector({s}, {s}, {s}, "{s}"),
+                        , .{
+                            field_name,
+                            module_name,
+                            args.items[0].name,
+                            field_type[2..],
+                            args.items[1].name,
+                            field_getter,
+                        });
+                    }
+                    continue;
+                },
+                .obj, .@"union" => |t| brk: {
+                    if (try field.isStruct(self.schema)) break :brk;
+
+                    const child = field.type.child(self.schema).?;
+                    const maybe_allocator_param = if (child.isAllocated(self.schema)) try self.allocPrint("{s}, ", .{args.items[0].name}) else try self.allocator.alloc(u8, 0);
+                    defer self.allocator.free(maybe_allocator_param);
+                    if (field.type.is_optional and t != .@"union") {
+                        try writer.print(
+                            \\
+                            \\    .{0s} = if (try {1s}.{2s}()) |{3s}| try {4s}.init({5s}{3s}) else null,
+                        , .{
+                            field_name,
+                            args.items[arg_index].name,
+                            field_getter,
+                            try self.getTmpName(field_name[0..1]),
+                            field_type[1..],
+                            maybe_allocator_param,
+                        });
+                    } else {
+                        try writer.print(
+                            \\
+                            \\    .{s} = try {s}.init({s} try {s}.{s}()),
+                        , .{
+                            field_name,
+                            field_type,
+                            maybe_allocator_param,
+                            args.items[1].name,
+                            field_getter,
+                        });
+                    }
+                    continue;
+                },
+                else => {},
             }
+            try writer.print(
+                \\
+                \\    .{s} = try {s}.{s}(),
+            , .{ field_name, args.items[arg_index].name, field_getter });
         }
         try writer.writeAll(
             \\
@@ -736,45 +720,68 @@ pub const CodeWriter = struct {
         };
         try self.writeFnSig("deinit", false, "void", &args);
         for (object.fields) |field| {
-            if (try field.type.isAllocated(self.schema)) {
-                const child = (try field.type.child(self.schema)).?;
-                const has_allocations = switch (child) {
-                    .object => |o| try self.hasAllocations(o),
-                    else => false,
-                };
-                if (has_allocations) {
+            if (field.type.base_type == .utype or field.deprecated) continue;
+
+            const field_name = try self.getFieldName(field.name);
+
+            switch (field.type.base_type) {
+                .vector => brk: {
+                    if (!field.type.isAllocated(self.schema)) break :brk;
+                    const child = field.type.child(self.schema).?;
+                    if (child.isAllocated(self.schema)) {
+                        try writer.print(
+                            \\
+                            \\for ({0s}.{1s}) |{2s}| {2s}.deinit({3s});
+                        , .{
+                            args[0].name,
+                            field_name,
+                            try self.getTmpName(field_name[0..1]),
+                            args[1].name,
+                        });
+                    }
                     try writer.print(
                         \\
-                        \\for ({0s}.{1s}) |{2s}| {2s}.deinit({3s});
+                        \\{s}.free({s}.{s});
                     , .{
-                        args[0].name,
-                        field.name,
-                        try self.getTmpName(field.name[0..1]),
                         args[1].name,
+                        args[0].name,
+                        field_name,
                     });
-                }
-                try writer.print(
-                    \\
-                    \\{s}.free({s}.{s});
-                , .{
-                    args[1].name,
-                    args[0].name,
-                    field.name,
-                });
+                },
+                .obj, .@"union" => brk: {
+                    if (try field.isStruct(self.schema)) break :brk;
+
+                    const child = field.type.child(self.schema).?;
+                    if (!child.isAllocated(self.schema)) break :brk;
+
+                    if (field.type.is_optional) {
+                        try writer.print(
+                            \\
+                            \\    if ({0s}.{1s}) |{2s}| {2s}.deinit({3s});
+                        , .{
+                            args[0].name,
+                            field_name,
+                            try self.getTmpName(field_name[0..1]),
+                            args[1].name,
+                        });
+                    } else {
+                        try writer.print(
+                            \\
+                            \\    {s}.{s}.deinit({s});
+                        , .{
+                            args[0].name,
+                            field_name,
+                            args[1].name,
+                        });
+                    }
+                },
+                else => {},
             }
         }
         try writer.writeAll(
             \\
             \\}
         );
-    }
-
-    fn hasAllocations(self: Self, object: Object) !bool {
-        for (object.fields) |field| {
-            if (field.deprecated) continue;
-            if (try field.type.isAllocated(self.schema)) return true;
-        }
-        return false;
     }
 
     // Caller owns returned string
@@ -813,7 +820,7 @@ pub const CodeWriter = struct {
                     \\const {s} = @This();
                     \\
                 , .{self_ident});
-                const has_allocations = try self.hasAllocations(object);
+                const has_allocations = object.isAllocated(self.schema);
                 try self.writeObjectInitFn(object, has_allocations, packed_name);
                 try writer.writeByte('\n');
                 if (has_allocations) try self.writeObjectDeinitFn(object);

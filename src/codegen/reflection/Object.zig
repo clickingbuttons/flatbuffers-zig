@@ -59,6 +59,14 @@ pub const Object = struct {
     pub fn inFile(self: Self, file_ident: []const u8) bool {
         return self.declaration_file.len == 0 or std.mem.eql(u8, self.declaration_file, file_ident);
     }
+
+    pub fn isAllocated(self: Self, schema: types.Schema) bool {
+        for (self.fields) |field| {
+            if (field.deprecated) continue;
+            if (field.type.isAllocated(schema)) return true;
+        }
+        return false;
+    }
 };
 
 pub const PackedObject = struct {

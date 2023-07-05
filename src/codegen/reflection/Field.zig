@@ -72,13 +72,10 @@ pub const Field = struct {
     }
 
     pub fn isStruct(self: Self, schema: types.Schema) !bool {
-        switch (self.type.base_type) {
-            .obj => {
-                const child = (try self.type.child(schema)).?;
-                return child.isStruct();
-            },
-            else => return false,
-        }
+        return switch (self.type.base_type) {
+            .obj => self.type.child(schema).?.isStruct(),
+            else => false,
+        };
     }
 };
 

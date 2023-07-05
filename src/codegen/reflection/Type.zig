@@ -51,6 +51,14 @@ pub const ChildType = union(enum) {
             else => false,
         };
     }
+
+    pub fn isAllocated(self: Self, schema: types.Schema) bool {
+        return switch (self) {
+            .@"enum" => |e| e.isAllocated(schema),
+            .object => |o| o.isAllocated(schema),
+            .scalar => false,
+        };
+    }
 };
 
 pub const Type = struct {
@@ -89,7 +97,7 @@ pub const Type = struct {
     }
 
     // Added declarations to aid codegen
-    pub fn child(self: Self, schema: types.Schema) !?ChildType {
+    pub fn child(self: Self, schema: types.Schema) ?ChildType {
         switch (self.base_type) {
             .array, .vector => {
                 if (self.element.isScalar()) return .{ .scalar = self.element };
@@ -114,9 +122,9 @@ pub const Type = struct {
         return null;
     }
 
-    pub fn isIndirect(self: Self, schema: types.Schema) !bool {
+    pub fn isIndirect(self: Self, schema: types.Schema) bool {
         if (self.base_type == .vector) {
-            if (try self.child(schema)) |c| {
+            if (self.child(schema)) |c| {
                 if (c.type().base_type == .string) return true;
                 if (!c.type().base_type.isScalar()) return !c.isStruct();
             }
@@ -124,19 +132,25 @@ pub const Type = struct {
         return false;
     }
 
-    pub fn isAllocated(self: Self, schema: types.Schema) !bool {
-        if (self.base_type == .vector) {
-            if (try self.child(schema)) |c| {
-                if (c.type().base_type == .string) return true;
-                if (!c.type().base_type.isScalar()) return true;
-            }
+    pub fn isAllocated(self: Self, schema: types.Schema) bool {
+        switch (self.base_type) {
+            .vector => {
+                if (self.child(schema)) |c| {
+                    if (c.type().base_type == .string) return true;
+                    if (!c.type().base_type.isScalar()) return true;
+                }
+            },
+            .obj => {
+                if (self.child(schema)) |c| return c.object.isAllocated(schema);
+            },
+            else => {},
         }
         return false;
     }
 
     pub fn isPackable(self: Self, schema: types.Schema) bool {
         return switch (self.base_type) {
-            .obj => if (try self.child(schema)) |c| !c.isStruct() else true,
+            .obj => if (self.child(schema)) |c| !c.isStruct() else true,
             .@"union", .utype => true,
             else => false,
         };

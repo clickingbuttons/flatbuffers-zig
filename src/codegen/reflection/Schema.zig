@@ -10,6 +10,8 @@ pub const Schema = struct {
     root_table: ?types.Object = null,
     services: []types.Service,
     advanced_features: types.AdvancedFeatures = .{},
+    /// All the files used in this compilation. Files are relative to where
+    /// flatc was invoked.
     fbs_files: []types.SchemaFile,
 
     const Self = @This();
@@ -32,8 +34,10 @@ pub const Schema = struct {
         allocator.free(self.objects);
         for (self.enums) |e| e.deinit(allocator);
         allocator.free(self.enums);
+        if (self.root_table) |r| r.deinit(allocator);
         for (self.services) |s| s.deinit(allocator);
         allocator.free(self.services);
+        for (self.fbs_files) |f| f.deinit(allocator);
         allocator.free(self.fbs_files);
     }
 

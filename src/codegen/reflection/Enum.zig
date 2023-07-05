@@ -61,6 +61,17 @@ pub const Enum = struct {
 
         return false;
     }
+
+    pub fn isAllocated(self: Self, schema: types.Schema) bool {
+        if (self.is_union) {
+            for (self.values) |v| {
+                if (v.union_type) |t| {
+                    if (t.isAllocated(schema)) return true;
+                }
+            }
+        }
+        return false;
+    }
 };
 
 pub const PackedEnum = struct {

@@ -18,7 +18,8 @@
 		- [x] default bit packed union
 		- [x] fix packing strings
 		- [x] fix monster codegen
-		- [ ] fix schema leaks (attributes)
+		- [x] fix schema leaks (attributes)
+		- [ ] union with objects that allocate
 options:
 - [x] casing for function names
 - [ ] setters
