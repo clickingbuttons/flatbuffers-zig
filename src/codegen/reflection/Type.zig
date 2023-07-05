@@ -59,6 +59,14 @@ pub const ChildType = union(enum) {
             .scalar => false,
         };
     }
+
+    pub fn isEmpty(self: Self) bool {
+        return switch (self) {
+            .@"enum" => |e| e.values.len == 0,
+            .object => |o| o.fields.len == 0,
+            .scalar => false,
+        };
+    }
 };
 
 pub const Type = struct {
@@ -141,10 +149,7 @@ pub const Type = struct {
                 }
             },
             .obj => {
-                if (self.child(schema)) |c| {
-                    if (c.isStruct()) return false;
-                    return c.object.isAllocated(schema);
-                }
+                if (self.child(schema)) |c| return c.object.isAllocated(schema);
             },
             else => {},
         }
@@ -157,6 +162,16 @@ pub const Type = struct {
             .@"union", .utype => true,
             else => false,
         };
+    }
+
+    pub fn isEmpty(self: Self, schema: types.Schema) bool {
+        switch (self.base_type) {
+            .obj, .@"union" => {
+                if (self.child(schema)) |c| return c.isEmpty();
+            },
+            else => {},
+        }
+        return false;
     }
 };
 

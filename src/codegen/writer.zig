@@ -659,7 +659,7 @@ pub const CodeWriter = struct {
                     continue;
                 },
                 .obj, .@"union" => |t| brk: {
-                    if (try field.isStruct(self.schema)) break :brk;
+                    if (try field.isStruct(self.schema) or field.type.isEmpty(self.schema)) break :brk;
 
                     const child = field.type.child(self.schema).?;
                     const maybe_allocator_param = if (child.isAllocated(self.schema))
@@ -913,8 +913,13 @@ pub const CodeWriter = struct {
             try writer.print("        .{s} => ", .{tag_name});
             if (ty.base_type == .none) {
                 try writer.print(".{s}", .{tag_name});
+            } else if (ty.isEmpty(self.schema)) {
+                try writer.print(".{{ .{s} = .{{}} }}", .{tag_name});
             } else if (ty.base_type.isScalar()) {
-                try writer.print("|{0s}| {0s}", .{try self.getTmpName(tag_name[0..1])});
+                try writer.print("|{0s}| .{{ .{1s} = {0s} }}", .{
+                    try self.getTmpName(tag_name[0..1]),
+                    tag_name,
+                });
             } else if (ty.isAllocated(self.schema)) {
                 try writer.print("|{0s}| .{{ .{1s} = try {2s}.init({3s}, {0s}) }}", .{
                     try self.getTmpName(typename[0..1]),
