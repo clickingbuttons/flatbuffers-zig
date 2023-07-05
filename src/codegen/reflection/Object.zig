@@ -61,6 +61,7 @@ pub const Object = struct {
     }
 
     pub fn isAllocated(self: Self, schema: types.Schema) bool {
+        if (self.is_struct) return false;
         for (self.fields) |field| {
             if (field.deprecated) continue;
             if (field.type.isAllocated(schema)) return true;

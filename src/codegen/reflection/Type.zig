@@ -141,7 +141,10 @@ pub const Type = struct {
                 }
             },
             .obj => {
-                if (self.child(schema)) |c| return c.object.isAllocated(schema);
+                if (self.child(schema)) |c| {
+                    if (c.isStruct()) return false;
+                    return c.object.isAllocated(schema);
+                }
             },
             else => {},
         }

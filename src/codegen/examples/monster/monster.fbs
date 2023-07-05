@@ -17,12 +17,12 @@ table Monster {
 	equipped:Equipment;
 	path:[Vec3];
 	rotation:Vec4;
-	friends:[string];
 }
 
 table Weapon {
 	name:string;
 	damage:short;
+	owners:[string];
 }
 
 root_type Monster;

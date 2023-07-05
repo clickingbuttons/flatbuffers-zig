@@ -20,7 +20,11 @@ pub const CodeWriter = struct {
         index: usize,
         offset: usize,
     };
-    const OffsetMap = std.StringHashMap([]const u8);
+    const Offset = struct {
+        name: []const u8,
+        offset: []const u8,
+    };
+    const OffsetList = std.ArrayList(Offset);
     const IdentMap = std.StringHashMap([]const u8);
 
     buffer: std.ArrayList(u8),
@@ -235,16 +239,13 @@ pub const CodeWriter = struct {
 
     // This struct owns returned string.
     fn getTmpName(self: *Self, name: []const u8) ![]const u8 {
-        var actual_name = try self.allocator.alloc(u8, name.len);
-        defer self.allocator.free(actual_name);
-        @memcpy(actual_name, name);
+        var res = try std.ArrayList(u8).initCapacity(self.allocator, name.len);
+        defer res.deinit();
+        try util.toSnakeCase(res.writer(), name);
 
-        while (self.ident_map.get(actual_name)) |_| {
-            actual_name = try self.allocator.realloc(actual_name, actual_name.len + 1);
-            actual_name[actual_name.len - 1] = '_';
-        }
+        while (self.ident_map.get(res.items)) |_| try res.append('_');
 
-        return self.string_pool.getOrPut(actual_name);
+        return self.string_pool.getOrPut(res.items);
     }
 
     // This struct owns returned string.
@@ -476,7 +477,7 @@ pub const CodeWriter = struct {
         self: *Self,
         writer: anytype,
         field: types.Field,
-        offset_map: *OffsetMap,
+        offset_list: *OffsetList,
         args: []Arg,
         offsets_name: []const u8,
     ) !void {
@@ -513,7 +514,7 @@ pub const CodeWriter = struct {
                     const offset = try self.string_pool.getOrPutFmt(
                         \\try {s}.prependString({s}.{s})
                     , .{ builder_name, self_name, field_name });
-                    try offset_map.put(field_name, offset);
+                    try offset_list.append(.{ .name = field_name, .offset = offset });
                 },
                 .vector => {
                     const offset = try self.string_pool.getOrPutFmt(
@@ -525,13 +526,13 @@ pub const CodeWriter = struct {
                         self_name,
                         field_name,
                     });
-                    try offset_map.put(field_name, offset);
+                    try offset_list.append(.{ .name = field_name, .offset = offset });
                 },
                 .obj, .@"union" => {
                     const offset = try self.string_pool.getOrPutFmt(
                         \\try {s}.{s}.pack({s})
                     , .{ self_name, field_name, builder_name });
-                    try offset_map.put(field_name, offset);
+                    try offset_list.append(.{ .name = field_name, .offset = offset });
                 },
             }
         } else {
@@ -544,8 +545,8 @@ pub const CodeWriter = struct {
 
     fn writePackFn(self: *Self, object: Object) !void {
         const writer = self.buffer.writer();
-        var offset_map = OffsetMap.init(self.allocator);
-        defer offset_map.deinit();
+        var offset_list = OffsetList.init(self.allocator);
+        defer offset_list.deinit();
 
         _ = try self.putDeclaration(self.opts.module_name, self.opts.module_name);
         var args = [_]Arg{
@@ -564,20 +565,19 @@ pub const CodeWriter = struct {
             try self.writePackForField(
                 field_pack_code.writer(),
                 field,
-                &offset_map,
+                &offset_list,
                 &args,
                 offsets_name,
             );
         }
 
-        if (offset_map.count() > 0) {
+        if (offset_list.items.len > 0) {
             try writer.print("\nconst {s} = .{{", .{offsets_name});
-            var iter = offset_map.iterator();
-            while (iter.next()) |kv| {
+            for (offset_list.items) |offset| {
                 try writer.print(
                     \\
                     \\    .{s} = {s},
-                , .{ kv.key_ptr.*, kv.value_ptr.* });
+                , .{ offset.name, offset.offset });
             }
             try writer.writeAll("\n};");
         }
@@ -653,8 +653,13 @@ pub const CodeWriter = struct {
                     if (try field.isStruct(self.schema)) break :brk;
 
                     const child = field.type.child(self.schema).?;
-                    const maybe_allocator_param = if (child.isAllocated(self.schema)) try self.allocPrint("{s}, ", .{args.items[0].name}) else try self.allocator.alloc(u8, 0);
+                    const maybe_allocator_param = if (child.isAllocated(self.schema))
+                        try self.allocPrint("{s}, ", .{args.items[0].name})
+                    else
+                        try self.allocator.alloc(u8, 0);
                     defer self.allocator.free(maybe_allocator_param);
+
+                    // Unions have a "none" to represent null
                     if (field.type.is_optional and t != .@"union") {
                         try writer.print(
                             \\
@@ -709,6 +714,67 @@ pub const CodeWriter = struct {
         , .{ mod_decl, args[0].name });
     }
 
+    fn writeFieldDeinit(
+        self: *Self,
+        field_type: types.Type,
+        field_name: []const u8,
+        self_name: []const u8,
+        allocator_name: []const u8,
+    ) !void {
+        const writer = self.buffer.writer();
+        switch (field_type.base_type) {
+            .vector => brk: {
+                if (!field_type.isAllocated(self.schema)) break :brk;
+                const child = field_type.child(self.schema).?;
+                if (child.isAllocated(self.schema)) {
+                    try writer.print(
+                        \\
+                        \\for ({0s}.{1s}) |{2s}| {2s}.deinit({3s});
+                    , .{
+                        self_name,
+                        field_name,
+                        try self.getTmpName(field_name[0..1]),
+                        allocator_name,
+                    });
+                }
+                try writer.print(
+                    \\
+                    \\{s}.free({s}.{s});
+                , .{
+                    allocator_name,
+                    self_name,
+                    field_name,
+                });
+            },
+            .obj, .@"union" => |t| {
+                const child = field_type.child(self.schema).?;
+                if (!child.isAllocated(self.schema)) return;
+                // Unions have a "none" to represent null
+                if (field_type.is_optional and t != .@"union") {
+                    try writer.print(
+                        \\
+                        \\    if ({0s}.{1s}) |{2s}| {2s}.deinit({3s});
+                    , .{
+                        self_name,
+                        field_name,
+                        try self.getTmpName(field_name[0..1]),
+                        allocator_name,
+                    });
+                } else {
+                    try writer.print(
+                        \\
+                        \\    {s}.{s}.deinit({s});
+                    , .{
+                        self_name,
+                        field_name,
+                        allocator_name,
+                    });
+                }
+            },
+            else => {},
+        }
+    }
+
     fn writeObjectDeinitFn(self: *Self, object: Object) !void {
         const writer = self.buffer.writer();
         _ = try self.putDeclaration("std", "std");
@@ -723,60 +789,7 @@ pub const CodeWriter = struct {
             if (field.type.base_type == .utype or field.deprecated) continue;
 
             const field_name = try self.getFieldName(field.name);
-
-            switch (field.type.base_type) {
-                .vector => brk: {
-                    if (!field.type.isAllocated(self.schema)) break :brk;
-                    const child = field.type.child(self.schema).?;
-                    if (child.isAllocated(self.schema)) {
-                        try writer.print(
-                            \\
-                            \\for ({0s}.{1s}) |{2s}| {2s}.deinit({3s});
-                        , .{
-                            args[0].name,
-                            field_name,
-                            try self.getTmpName(field_name[0..1]),
-                            args[1].name,
-                        });
-                    }
-                    try writer.print(
-                        \\
-                        \\{s}.free({s}.{s});
-                    , .{
-                        args[1].name,
-                        args[0].name,
-                        field_name,
-                    });
-                },
-                .obj, .@"union" => brk: {
-                    if (try field.isStruct(self.schema)) break :brk;
-
-                    const child = field.type.child(self.schema).?;
-                    if (!child.isAllocated(self.schema)) break :brk;
-
-                    if (field.type.is_optional) {
-                        try writer.print(
-                            \\
-                            \\    if ({0s}.{1s}) |{2s}| {2s}.deinit({3s});
-                        , .{
-                            args[0].name,
-                            field_name,
-                            try self.getTmpName(field_name[0..1]),
-                            args[1].name,
-                        });
-                    } else {
-                        try writer.print(
-                            \\
-                            \\    {s}.{s}.deinit({s});
-                        , .{
-                            args[0].name,
-                            field_name,
-                            args[1].name,
-                        });
-                    }
-                },
-                else => {},
-            }
+            try self.writeFieldDeinit(field.type, field_name, args[0].name, args[1].name);
         }
         try writer.writeAll(
             \\
@@ -862,31 +875,96 @@ pub const CodeWriter = struct {
         }
     }
 
-    fn writeUnionInitFn(self: *Self, packed_typename: []const u8) !void {
+    fn writeUnionInitFn(self: *Self, enum_: Enum, packed_typename: []const u8) !void {
         const writer = self.buffer.writer();
         const self_ident = self.ident_map.get("Self").?;
-        var args = [_]Arg{
-            .{ .name = "packed_", .type = packed_typename },
-        };
-        try self.writeFnSig("init", true, self_ident, &args);
-        const mod_name = try self.putDeclaration(self.opts.module_name, self.opts.module_name);
+
+        var args = std.ArrayList(Arg).init(self.allocator);
+        defer args.deinit();
+
+        const is_allocated = enum_.isAllocated(self.schema);
+        if (is_allocated) try args.append(.{ .name = "allocator", .type = "std.mem.Allocator" });
+        try args.append(.{ .name = "packed_", .type = packed_typename });
+        try self.writeFnSig("init", true, self_ident, args.items);
+
+        const packed_arg_name = args.items[if (is_allocated) 1 else 0].name;
+
         try writer.print(
             \\
-            \\    switch ({s}) {{
-            \\        inline else => |v, t| {{
-            \\            var result = @unionInit({s}, @tagName(t), undefined);
-            \\            const field = &@field(result, @tagName(t));
-            \\            const Field = @TypeOf(field.*);
-            \\            field.* = if (comptime {s}.Table.isPacked(Field)) v else try Field.init(v);
-            \\            return result;
-            \\        }},
-            \\    }}
-            \\}}
-        , .{ args[0].name, self_ident, mod_name });
+            \\    return switch ({s}) {{
+        , .{packed_arg_name});
+        for (enum_.values) |enum_val| {
+            const ty = enum_val.union_type.?;
+            const tag_name = try self.getTagName(enum_val.name);
+            const typename = try self.getType(ty);
+
+            try writer.print("        .{s} => ", .{tag_name});
+            if (ty.base_type == .none) {
+                try writer.print(".{s}", .{tag_name});
+            } else if (ty.base_type.isScalar()) {
+                try writer.print("|{0s}| {0s}", .{try self.getTmpName(tag_name[0..1])});
+            } else if (ty.isAllocated(self.schema)) {
+                try writer.print("|{0s}| .{{ .{1s} = try {2s}.init({3s}, {0s}) }}", .{
+                    try self.getTmpName(typename[0..1]),
+                    tag_name,
+                    typename,
+                    args.items[0].name,
+                });
+            } else {
+                try writer.print("|{0s}| .{{ .{1s} = try {2s}.init({0s}) }}", .{
+                    try self.getTmpName(typename[0..1]),
+                    tag_name,
+                    typename,
+                });
+            }
+            try writer.writeByte(',');
+        }
+        try writer.writeAll(
+            \\
+            \\    };
+            \\}
+        );
+    }
+
+    fn writeUnionDeinitFn(self: *Self, enum_: Enum) !void {
+        const writer = self.buffer.writer();
+        _ = try self.putDeclaration("std", "std");
+        try writer.writeByte('\n');
+
+        const self_ident = self.ident_map.get("Self").?;
+        var args = [_]Arg{
+            .{ .name = "self", .type = self_ident },
+            .{ .name = "allocator", .type = "std.mem.Allocator" },
+        };
+        try self.writeFnSig("deinit", false, "void", &args);
+        try writer.print(
+            \\
+            \\    switch({s}) {{
+        , .{args[0].name});
+        for (enum_.values) |enum_val| {
+            const enum_type = enum_val.union_type.?;
+            if (!enum_type.isAllocated(self.schema)) continue;
+
+            const tag_name = try self.getTagName(enum_val.name);
+            const field_name = try self.getFieldName(enum_val.name);
+
+            try writer.print(
+                \\        .{s} => {{
+            , .{tag_name});
+            try self.writeFieldDeinit(enum_type, field_name, args[0].name, args[1].name);
+            try writer.writeAll("\n},");
+        }
+        try writer.writeAll(
+            \\
+            \\        else => {},
+            \\    }
+            \\}
+        );
     }
 
     fn writeUnionPackFn(self: *Self) !void {
         const writer = self.buffer.writer();
+        try writer.writeByte('\n');
         var args = [_]Arg{
             .{ .name = "self", .type = "Self" },
             .{ .name = "builder", .type = "*flatbuffers.Builder" },
@@ -897,7 +975,7 @@ pub const CodeWriter = struct {
             \\
             \\    switch ({0s}) {{
             \\        inline else => |v| {{
-            \\            if (comptime {2s}.Table.isPacked(@TypeOf(v))) {{
+            \\            if (comptime {2s}.isPacked(@TypeOf(v))) {{
             \\                try {1s}.prepend(v);
             \\                return {1s}.offset();
             \\            }}
@@ -949,7 +1027,8 @@ pub const CodeWriter = struct {
                     \\
                 , .{self.ident_map.get("Self").?});
 
-                try self.writeUnionInitFn(packed_name);
+                try self.writeUnionInitFn(enum_, packed_name);
+                if (enum_.isAllocated(self.schema)) try self.writeUnionDeinitFn(enum_);
                 try self.writeUnionPackFn();
             }
         }

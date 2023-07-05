@@ -361,10 +361,15 @@ const Vec4 = extern struct {
 const Equipment = enum(u8) { none, weapon };
 
 fn exampleWeapon(builder: *Builder, name: []const u8, damage: i16) !Offset {
+    const owners = try builder.prependVectorOffsets([:0]const u8, @constCast(&[_][:0]const u8{
+        "Shrek",
+        "Fiona",
+    }));
     const weapon_name = try builder.prependString(name);
     try builder.startTable();
     try builder.appendTableFieldOffset(weapon_name); // field 0 (name)
     try builder.appendTableField(i16, damage); // field 1 (damage)
+    try builder.appendTableFieldOffset(owners); // field 2 (owners)
     return try builder.endTable();
 }
 
@@ -378,10 +383,6 @@ pub fn exampleMonster(allocator: Allocator) ![]u8 {
     const inventory = try builder.prependVector(u8, &[_]u8{ 1, 2, 3 });
     const weapons = try builder.prependOffsets(@constCast(&[_]Offset{ weapon0, weapon1 }));
     const path = try builder.prependVector(Vec3, &[_]Vec3{ .{ .x = 1, .y = 2, .z = 3 }, .{ .x = 4, .y = 5, .z = 6 } });
-    const friends = try builder.prependVectorOffsets([:0]const u8, @constCast(&[_][:0]const u8{
-        "Shrek",
-        "Fiona",
-    }));
 
     try builder.startTable();
     try builder.appendTableField(Vec3, .{ .x = 1, .y = 2, .z = 3 }); // field 0 (pos)
@@ -396,7 +397,6 @@ pub fn exampleMonster(allocator: Allocator) ![]u8 {
     try builder.appendTableFieldOffset(weapon0); // field 9 (equipment value)
     try builder.appendTableFieldOffset(path); // field 10 (path)
     try builder.appendTableField(Vec4, .{ .v = .{ 1, 2, 3, 4 } }); // field 11 (rotation)
-    try builder.appendTableFieldOffset(friends); // field 12 (friends)
     const root = try builder.endTable();
 
     return builder.finish(root);
@@ -405,101 +405,154 @@ pub fn exampleMonster(allocator: Allocator) ![]u8 {
 test "build monster" {
     // annotated to make debugging Table easier
     const bytes = try exampleMonster(testing.allocator);
-    var file = try std.fs.cwd().createFile("monster2.bfbs", .{});
+    // Flatc has a handly annotation tool for making this test:
+    // ../flatbuffers/zig-out/bin/flatc --annotate ./src/codegen/examples/monster/monster.fbs ./monster_data.bfbs
+    var file = try std.fs.cwd().createFile("monster_data.bfbs", .{});
     defer file.close();
     try file.writer().writeAll(bytes);
     defer testing.allocator.free(bytes);
     try testing.expectEqualSlices(u8, &[_]u8{
-        0x28, 0, 0, 0, // offset to root table
+        // header
+        0x2C, 0, 0, 0, // offset to root table `Monster`
         0, 0, 0, 0, // padding
+        0, 0, 0, 0, // padding
+        0, 0, 0, 0, // padding (TODO: too much padding?)
+
+        // vtable `Monster`
+        0x1c, 0, // vtable len
+        0x50, 0, // table len
+        0x3c, 0, // offset to field `pos` (id: 0)
+        0x3a, 0, // offset to field `mana` (id: 1)
+        0x38, 0, // offset to field `hp` (id: 2)
+        0x34, 0, // offset to field `name` (id: 3)
+        0x00, 0, // offset to field `friendly` (id: 4) <defaults to 0> (Bool)
+        0x30, 0, // offset to field `inventory` (id: 5)
+        0x2f, 0, // offset to field `color` (id: 6)
+        0x28, 0, // offset to field `weapons` (id: 7)
+        0x27, 0, // offset to field `equipped_type` (id: 8)
+        0x20, 0, // offset to field `equipped` (id: 9)
+        0x1c, 0, // offset to field `path` (id: 10)
+        0x04, 0, // offset to field `rotation` (id: 11)
+
+        // root table `Monster`
+        0x1C, 0, 0, 0, // offset to vtable
+        0, 0, 0x80, 0x3F, // rotation[0] = @as(f32, 1)
+        0, 0, 0, 0x40, // rotation[1] = @as(f32, 2)
+        0, 0, 0x40, 0x40, // rotation[2] = @as(f32, 3)
+        0, 0, 0x80, 0x40, // rotation[3] = @as(f32, 4)
+        0, 0, 0, 0, // padding
+        0, 0, 0, 0, // padding
+        0x34, 0, 0, 0, // offset to field `path` (vector)
+        0xB8, 0, 0, 0, // offset to field `equipped` (union of type `Weapon`)
+        0, 0, 0, @enumToInt(Equipment.weapon), // equipped_type
+        0x44, 0, 0, 0, // offset to field `weapons` (vector)
+        0, 0, 0, @enumToInt(Color.green), // table field `color` (Byte)
+        0x48, 0, 0, 0, // offset to field `inventory` (vector)
+        0x4C, 0, 0, 0, // offset to field `name` (string)
+        0xC8, 0, // table field `hp` (Short)
+        0x64, 0, // table field `mana` (Short)
+        0, 0, 0x80, 0x3F, // struct field `pos.x` of 'Vec3' (Float)
+        0, 0, 0, 0x40, // struct field `pos.y` of 'Vec3' (Float)
+        0, 0, 0x40, 0x40, // struct field `pos.z` of 'Vec3' (Float)
+        0, 0, 0, 0, // padding
+        0, 0, 0, 0, // padding
+
+        // vector `Monster.path`
+        0x02, 0, 0, 0, // length of vector (# items)
+        0, 0, 0x80, 0x3F, // struct field `[0].x` of 'Vec3' (Float)
+        0, 0, 0, 0x40, // struct field `[0].y` of 'Vec3' (Float)
+        0, 0, 0x40, 0x40, // struct field `[0].z` of 'Vec3' (Float)
+        0, 0, 0x80, 0x40, // struct field `[1].x` of 'Vec3' (Float)
+        0, 0, 0xA0, 0x40, // struct field `[1].y` of 'Vec3' (Float)
+        0, 0, 0xC0, 0x40, // struct field `[1].z` of 'Vec3' (Float)
+
+        // vector (Monster.weapons):
+        0x02, 0, 0, 0, // length of vector (# items)
+        0x68, 0, 0, 0, // offset to table[0]
+        0x20, 0, 0, 0, // offset to table[1]
+
+        // vector (Monster.inventory):
+        0x03, 0, 0, 0, // length of vector (# items)
+        0x01, // value[0]
+        0x02, // value[1]
+        0x03, // value[2]
+        0, // padding
+
+        // string (Monster.name):
+        0x03, 0, 0, 0, // length of string
+        0x6F, 0x72, 0x63, // string literal
+        0, // string terminator
         0, 0, // padding
-        // header start
-        0x1e, 0, // vtable len
-        0x54, 0, // table len
-        0x40, 0, // offset to field  0 from vtable start (pos)
-        0x3e, 0, // offset to field  1 from vtable start (mana)
-        0x3c, 0, // offset to field  2 from vtable start (hp)
-        0x38, 0, // offset to field  3 from vtable start (name)
-        0, 0, //  offset to field  4 from vtable start (friendly)
-        0x34, 0, // offset to field  5 from vtable start (inventory)
-        0x33, 0, // offset to field  6 from vtable start (color)
-        0x2c, 0, // offset to field  7 from vtable start (weapons)
-        0x2b, 0, // offset to field  8 from vtable start (equipment type)
-        0x24, 0, // offset to field  9 from vtable start (equipment value)
-        0x20, 0, // offset to field 10 from vtable start (path)
-        0x08, 0, //  offset to field 11 from vtable start (rotation)
-        0x04, 0, //  offset to field 12 from vtable start (friends)
-        // vtable start (monster)
-        0x1e, 0, 0, 0, // negative offset to start of vtable from here
-        0x50, 0, 0, 0, // field 11 offset from here (friends)
-        0, 0, 0x80, 0x3F, // 1.0 ... field 11 (rotation)
-        0, 0, 0x00, 0x40, // 2.0
-        0, 0, 0x40, 0x40, // 3.0
-        0, 0, 0x80, 0x40, // 4.0
-        0, 0, 0, 0, // padding
-        0, 0, 0, 0, // padding
-        0x58, 0, 0, 0, // field 10 offset from here (path)
-        0xb0, 0, 0, 0, // field 9 offset from here (equipment value)
-        0, 0, 0, @enumToInt(Equipment.weapon), // field 8 (equipment type)
-        0x68, 0, 0, 0, // field 7 offset from here (weapons)
-        0, 0, 0, @enumToInt(Color.green), // field 6 (color)
-        0x6c, 0, 0, 0, // field 5 offset from here (inventory)
-        0x70, 0, 0, 0, // field 3 offset from here (name)
-        0xc8, 0x00, // field 2 (hp)
-        0x64, 0x00, // field 1 (mana)
-        0, 0, 0x80, 0x3F, // 1.0 ... field 0 (pos)
-        0, 0, 0x00, 0x40, // 2.0
-        0, 0, 0x40, 0x40, // 3.0
-        0, 0, 0, 0, // padding
-        0, 0, 0, 0, // padding
-        // table start (monster)
-        0x02, 0, 0, 0, // friends len
-        0x14, 0, 0, 0, // friends item 0 (offset to string from here)
-        0x04, 0, 0, 0, // friends item 1 (offset to string from here)
-        0x05, 0,   0,   0, // "Fiona".len
-        'F',  'i', 'o', 'n',
-        'a', 0, 0, 0, // padding
-        0x05, 0,   0,   0, // "Shrek".len
-        'S',  'h', 'r', 'e',
-        'k', 0, 0, 0, // padding
-        0x02, 0, 0, 0, // path len
-        0, 0, 0x80, 0x3F, // 1.0 ... field 10 (path) item 0
-        0, 0, 0x00, 0x40, // 2.0
-        0, 0, 0x40, 0x40, // 2.0
-        0, 0, 0x80, 0x40, // 4.0 ... field 10 (path) item 1
-        0, 0, 0xA0, 0x40, // 5.0
-        0, 0, 0xC0, 0x40, // 6.0
-        0x02, 0, 0, 0, // weapons len
-        0x3c, 0, 0, 0, // weapons item 0 (offset to table from here)
-        0x1c, 0, 0, 0, // weapons item 1 (offset to table from here)
-        0x03, 0, 0, 0, // inventory len
-        1, 2, 3, 0, // inventory data
-        0x03, 0, 0, 0, // "orc".len
-        'o', 'r', 'c', 0, // field 0 (name)
-        // string
-        0x08, 0, // vtable len
-        0x0c, 0, // table len
-        0x08, 0, // offset to field 0 from vtable start
-        0x06, 0, // offset to field 1 from vtable start
-        // vtable start (weapon1)
-        0x08, 0, 0, 0, // negative offset to start of vtable from here
-        0, 0, 23, 0, // field 1 (damage)
-        0x04, 0, 0, 0, // field 2 offset from here (name)
-        // table start (weapon1)
-        3, 0, 0, 0, // "axe".len
-        'a', 'x', 'e', 0, // field 0 (name)
-        // string
-        0x08, 0, // vtable len
-        0x0c, 0, // table len
-        0x08, 0, // offset to field 0 from vtable start
-        0x06, 0, // offset to field 1 from vtable start
-        // vtable start (weapon0)
-        0x08, 0, 0, 0, // negative offset to start of vtable from here
-        0, 0, 21, 0, // field 0 (damage)
-        0x04, 0, 0, 0, // field 1 offset from here (name)
-        // table start (weapon0)
-        0x03, 0, 0, 0, // "sword".len
-        's', 'a', 'w', 0, // field 0 (name)
-        // string
+
+        // vtable (Weapon):
+        0x0A, 0, // size of this vtable
+        0x10, 0, // size of referring table
+        0x0C, 0, // offset to field `name` (id: 0)
+        0x0A, 0, // offset to field `damage` (id: 1)
+        0x04, 0, // offset to field `owners` (id: 2)
+
+        // table (Weapon):
+        0x0A, 0, 0, 0, // offset to vtable
+        0x14, 0, 0, 0, // offset to field `owners` (vector)
+        0, 0, // padding
+        0x17, 0, // table field `damage` (Short)
+        0x04, 0, 0, 0, // offset to field `name` (string)
+
+        // string (Weapon.name):
+        0x03, 0, 0, 0, // length of string
+        0x61, 0x78, 0x65, // string literal
+        0, // string terminator
+
+        // vector (Weapon.owners):
+        0x02, 0, 0, 0, // length of vector (# items)
+        0x14, 0, 0, 0, // offset to string[0]
+        0x04, 0, 0, 0, // offset to string[1]
+
+        // string (Weapon.owners):
+        0x05, 0, 0, 0, // length of string
+        0x46, 0x69, 0x6F, 0x6E, 0x61, // string literal
+        0, // string terminator
+        0, 0, // padding
+
+        // string (Weapon.owners):
+        0x05, 0, 0, 0, // length of string
+        0x53, 0x68, 0x72, 0x65, 0x6B, // string literal
+        0, // string terminator
+
+        // vtable (Weapon):
+        0x0A, 0, // size of this vtable
+        0x10, 0, // size of referring table
+        0x0C, 0, // offset to field `name` (id: 0)
+        0x0A, 0, // offset to field `damage` (id: 1)
+        0x04, 0, // offset to field `owners` (id: 2)
+
+        // table (Weapon):
+        0x0A, 0, 0, 0, // offset to vtable
+        0x14, 0, 0, 0, // offset to field `owners` (vector)
+        0, 0, // padding
+        0x15, 0, // table field `damage` (Short)
+        0x04, 0, 0, 0, // offset to field `name` (string)
+
+        // string (Weapon.name):
+        0x03, 0, 0, 0, // length of string
+        0x73, 0x61, 0x77, // string literal
+        0, // string terminator
+
+        // vector (Weapon.owners):
+        0x02, 0, 0, 0, // length of vector (# items)
+        0x14, 0, 0, 0, // offset to string[0]
+        0x04, 0, 0, 0, // offset to string[1]
+
+        // string (Weapon.owners):
+        0x05, 0, 0, 0, // length of string
+        0x46, 0x69, 0x6F, 0x6E, 0x61, // string literal
+        0, // string terminator
+        0, 0, // padding
+
+        // string (Weapon.owners):
+        0x05, 0, 0, 0, // length of string
+        0x53, 0x68, 0x72, 0x65, 0x6B, // string literal
+        0, // string terminator
+        0, 0, // padding
     }, bytes);
 }

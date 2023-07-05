@@ -15,21 +15,26 @@ pub const Equipment = union(PackedEquipment.Tag) {
 
     const Self = @This();
 
-    pub fn init(packed_: PackedEquipment) !Self {
-        switch (packed_) {
-            inline else => |v, t| {
-                var result = @unionInit(Self, @tagName(t), undefined);
-                const field = &@field(result, @tagName(t));
-                const Field = @TypeOf(field.*);
-                field.* = if (comptime flatbuffers.Table.isPacked(Field)) v else try Field.init(v);
-                return result;
+    pub fn init(allocator: std.mem.Allocator, packed_: PackedEquipment) !Self {
+        return switch (packed_) {
+            .none => .none,
+            .weapon => |w| .{ .weapon = try Weapon.init(allocator, w) },
+        };
+    }
+
+    pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+        switch (self) {
+            .weapon => {
+                self.weapon.deinit(allocator);
             },
+            else => {},
         }
     }
+
     pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
         switch (self) {
             inline else => |v| {
-                if (comptime flatbuffers.Table.isPacked(@TypeOf(v))) {
+                if (comptime flatbuffers.isPacked(@TypeOf(v))) {
                     try builder.prepend(v);
                     return builder.offset();
                 }
@@ -57,7 +62,6 @@ pub const Monster = struct {
     equipped: Equipment,
     path: []Vec3,
     rotation: ?Vec4 = null,
-    friends: [][:0]const u8,
 
     const Self = @This();
 
@@ -70,26 +74,25 @@ pub const Monster = struct {
             .inventory = try packed_.inventory(),
             .color = try packed_.color(),
             .weapons = try flatbuffers.unpackVector(allocator, Weapon, packed_, "weapons"),
-            .equipped = try Equipment.init(try packed_.equipped()),
+            .equipped = try Equipment.init(allocator, try packed_.equipped()),
             .path = try flatbuffers.unpackVector(allocator, Vec3, packed_, "path"),
             .rotation = try packed_.rotation(),
-            .friends = try flatbuffers.unpackVector(allocator, [:0]const u8, packed_, "friends"),
         };
     }
 
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+        for (self.weapons) |w| w.deinit(allocator);
         allocator.free(self.weapons);
+        self.equipped.deinit(allocator);
         allocator.free(self.path);
-        allocator.free(self.friends);
     }
 
     pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
         const field_offsets = .{
-            .weapons = try builder.prependVectorOffsets(Weapon, self.weapons),
-            .friends = try builder.prependVectorOffsets([:0]const u8, self.friends),
-            .inventory = try builder.prependVector(u8, self.inventory),
-            .equipped = try self.equipped.pack(builder),
             .name = try builder.prependString(self.name),
+            .inventory = try builder.prependVector(u8, self.inventory),
+            .weapons = try builder.prependVectorOffsets(Weapon, self.weapons),
+            .equipped = try self.equipped.pack(builder),
             .path = try builder.prependVector(Vec3, self.path),
         };
 
@@ -106,7 +109,6 @@ pub const Monster = struct {
         try builder.appendTableFieldOffset(field_offsets.equipped);
         try builder.appendTableFieldOffset(field_offsets.path);
         try builder.appendTableField(?Vec4, self.rotation);
-        try builder.appendTableFieldOffset(field_offsets.friends);
         return builder.endTable();
     }
 };
@@ -173,13 +175,6 @@ pub const PackedMonster = struct {
     pub fn rotation(self: Self) !?Vec4 {
         return self.table.readField(?Vec4, 11);
     }
-
-    pub fn friendsLen(self: Self) !u32 {
-        return self.table.readFieldVectorLen(12);
-    }
-    pub fn friends(self: Self, index: usize) ![:0]const u8 {
-        return self.table.readFieldVectorItem([:0]const u8, 12, index);
-    }
 };
 
 pub const Vec3 = extern struct {
@@ -195,24 +190,32 @@ pub const Vec4 = extern struct {
 pub const Weapon = struct {
     name: [:0]const u8,
     damage: i16 = 0,
+    owners: [][:0]const u8,
 
     const Self = @This();
 
-    pub fn init(packed_: PackedWeapon) !Self {
+    pub fn init(allocator: std.mem.Allocator, packed_: PackedWeapon) !Self {
         return .{
             .name = try packed_.name(),
             .damage = try packed_.damage(),
+            .owners = try flatbuffers.unpackVector(allocator, [:0]const u8, packed_, "owners"),
         };
+    }
+
+    pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+        allocator.free(self.owners);
     }
 
     pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
         const field_offsets = .{
             .name = try builder.prependString(self.name),
+            .owners = try builder.prependVectorOffsets([:0]const u8, self.owners),
         };
 
         try builder.startTable();
         try builder.appendTableFieldOffset(field_offsets.name);
         try builder.appendTableField(i16, self.damage);
+        try builder.appendTableFieldOffset(field_offsets.owners);
         return builder.endTable();
     }
 };
@@ -232,5 +235,12 @@ pub const PackedWeapon = struct {
 
     pub fn damage(self: Self) !i16 {
         return self.table.readFieldWithDefault(i16, 1, 0);
+    }
+
+    pub fn ownersLen(self: Self) !u32 {
+        return self.table.readFieldVectorLen(2);
+    }
+    pub fn owners(self: Self, index: usize) ![:0]const u8 {
+        return self.table.readFieldVectorItem([:0]const u8, 2, index);
     }
 };

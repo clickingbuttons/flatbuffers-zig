@@ -3,6 +3,15 @@ pub const Builder = @import("./builder.zig").Builder;
 pub const exampleMonster = @import("./builder.zig").exampleMonster;
 pub const Table = @import("./table.zig").Table;
 
+pub const isPacked = Table.isPacked;
+
+pub fn hasAllocator(comptime T: type) bool {
+    if (@typeInfo(T) == .Struct and @hasDecl(T, "init")) {
+        return @typeInfo(@TypeOf(T.init)).Fn.params.len == 2;
+    }
+    return false;
+}
+
 /// Caller owns returned slice.
 pub fn unpackVector(
     allocator: std.mem.Allocator,
@@ -12,11 +21,10 @@ pub fn unpackVector(
 ) ![]T {
     const PackedT = @TypeOf(packed_);
     const getter = @field(PackedT, getter_name);
-    const info = @typeInfo(T);
 
     // 1. Vector of scalar (type has getter that returns align(1) slice)
     // We call this just to fix alignment.
-    if (info == .Struct and info.Struct.layout != .Auto) {
+    if (comptime isPacked(T)) {
         const arr = try getter(packed_);
         var res = try allocator.alloc(T, arr.len);
         for (0..arr.len) |i| res[i] = arr[i];
@@ -29,7 +37,7 @@ pub fn unpackVector(
     errdefer allocator.free(res);
 
     if (@typeInfo(T) == .Struct and @hasDecl(T, "init")) {
-        const has_allocator = @typeInfo(@TypeOf(T.init)).Fn.params.len == 2;
+        const has_allocator = comptime hasAllocator(T);
         for (res, 0..) |*r, i| r.* = if (has_allocator)
             // 2. Vector of object (with allocations)
             try T.init(allocator, try getter(packed_, @intCast(u32, i)))

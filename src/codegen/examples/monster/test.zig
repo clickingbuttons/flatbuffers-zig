@@ -21,21 +21,38 @@ const example_monster = Monster{
     .inventory = @constCast(&[_]u8{ 1, 2, 3 }),
     .color = .green,
     .weapons = @constCast(&[_]Weapon{
-        .{ .name = "saw", .damage = 21 },
-        .{ .name = "axe", .damage = 23 },
+        .{
+            .name = "saw",
+            .damage = 21,
+            .owners = @constCast(&[_][:0]const u8{
+                "Shrek",
+                "Fiona",
+            }),
+        },
+        .{
+            .name = "axe",
+            .damage = 23,
+            .owners = @constCast(&[_][:0]const u8{
+                "Shrek",
+                "Fiona",
+            }),
+        },
     }),
     .equipped = .{
-        .weapon = Weapon{ .name = "saw", .damage = 21 },
+        .weapon = Weapon{
+            .name = "saw",
+            .damage = 21,
+            .owners = @constCast(&[_][:0]const u8{
+                "Shrek",
+                "Fiona",
+            }),
+        },
     },
     .path = @constCast(&[_]Vec3{
         .{ .x = 1, .y = 2, .z = 3 },
         .{ .x = 4, .y = 5, .z = 6 },
     }),
     .rotation = Vec4{ .v = .{ 1, 2, 3, 4 } },
-    .friends = @constCast(&[_][:0]const u8{
-        "Shrek",
-        "Fiona",
-    }),
 };
 
 fn testPackedMonster(monster: PackedMonster) !void {
@@ -46,6 +63,7 @@ fn testPackedMonster(monster: PackedMonster) !void {
     try testing.expectEqualSlices(u8, &[_]u8{ 1, 2, 3 }, try monster.inventory());
     try testing.expectEqual(Color.green, try monster.color());
     try testing.expectEqual(@as(u32, 2), try monster.weaponsLen());
+
     const weapon0 = try monster.weapons(0);
     const weapon1 = try monster.weapons(1);
     try testing.expectEqualStrings(@as([:0]u8, @constCast(&"saw".*)), try weapon0.name());
@@ -53,18 +71,20 @@ fn testPackedMonster(monster: PackedMonster) !void {
     try testing.expectEqualStrings(@as([:0]u8, @constCast(&"axe".*)), try weapon1.name());
     try testing.expectEqual(@as(i16, 23), try weapon1.damage());
     try testing.expectEqual(Equipment.weapon, try monster.equippedType());
+
+    try testing.expectEqual(@as(usize, 2), try weapon0.ownersLen());
+    try testing.expectEqualStrings(@as([:0]u8, @constCast(&"Shrek".*)), try weapon0.owners(0));
+    try testing.expectEqualStrings(@as([:0]u8, @constCast(&"Fiona".*)), try weapon0.owners(1));
+
     const equipped = (try monster.equipped()).weapon;
     try testing.expectEqualStrings(@as([:0]u8, @constCast(&"saw".*)), try equipped.name());
     try testing.expectEqual(@as(i16, 21), try equipped.damage());
+
     const path = try monster.path();
     try testing.expectEqual(@as(usize, 2), path.len);
     try testing.expectEqual(Vec3{ .x = 1, .y = 2, .z = 3 }, path[0]);
     try testing.expectEqual(Vec3{ .x = 4, .y = 5, .z = 6 }, path[1]);
     try testing.expectEqual(Vec4{ .v = .{ 1, 2, 3, 4 } }, (try monster.rotation()).?);
-
-    try testing.expectEqual(@as(usize, 2), try monster.friendsLen());
-    try testing.expectEqualStrings(@as([:0]u8, @constCast(&"Shrek".*)), try monster.friends(0));
-    try testing.expectEqualStrings(@as([:0]u8, @constCast(&"Fiona".*)), try monster.friends(1));
 }
 
 test "build monster and read" {
