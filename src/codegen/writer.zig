@@ -820,14 +820,17 @@ pub const CodeWriter = struct {
                 \\
                 \\
                 \\pub const {s} = struct {{
-                \\    table: {s}.Table,
-                \\
-                \\    const {s} = @This();
-                \\
-            , .{ packed_name, mod_decl, self_ident });
-
-            try self.writePackedObjectInitFn(mod_decl);
-            try self.writeObjectFields(object, is_packed);
+            , .{packed_name});
+            if (object.fields.len > 0) {
+                try writer.print(
+                    \\    table: {s}.Table,
+                    \\
+                    \\    const {s} = @This();
+                    \\
+                , .{ mod_decl, self_ident });
+                try self.writePackedObjectInitFn(mod_decl);
+                try self.writeObjectFields(object, is_packed);
+            }
         } else {
             try writer.print(
                 \\
@@ -835,7 +838,7 @@ pub const CodeWriter = struct {
                 \\pub const {s} = {s}struct {{
             , .{ type_name, if (object.is_struct) "extern " else "" });
             try self.writeObjectFields(object, is_packed);
-            if (!object.is_struct) {
+            if (!object.is_struct and object.fields.len > 0) {
                 try writer.print(
                     \\
                     \\

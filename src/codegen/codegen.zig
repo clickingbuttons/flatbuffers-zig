@@ -76,6 +76,7 @@ fn writeFiles(
 
     const lib_fname = try getFilename(allocator, opts, "lib");
     var lib_file = try createFile(lib_fname, .{ .truncate = false });
+    try lib_file.seekFromEnd(0);
 
     for (objects_or_enums) |obj| {
         if (!obj.inFile(prelude.file_ident)) continue;

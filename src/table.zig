@@ -72,11 +72,14 @@ pub const Table = struct {
         const soffset = try self.readAt(i32, offset);
         offset = signedAdd(offset, soffset);
         switch (@typeInfo(Child)) {
-            .Struct => return Child{
-                .table = .{
-                    .flatbuffer = self.flatbuffer,
-                    .offset = offset,
-                },
+            .Struct => |s| {
+                if (s.fields.len == 0) return Child{};
+                return Child{
+                    .table = .{
+                        .flatbuffer = self.flatbuffer,
+                        .offset = offset,
+                    },
+                };
             },
             .Pointer => |p| brk: {
                 if (p.size != .Slice) break :brk;
