@@ -135,18 +135,16 @@ pub const Table = struct {
         };
     }
 
-    pub fn isSlice(comptime T: type) bool {
-        return switch (@typeInfo(T)) {
-            .Pointer => |p| p.Size == .Slice,
-            else => false,
-        };
-    }
-
     pub fn readField(self: Self, comptime T: type, id: VOffset) Error!T {
         if (T == void) return {};
         if (try self.getFieldOffset(id)) |offset| return self.readTableAt(T, offset);
 
-        return if (@typeInfo(T) == .Optional) null else Error.InvalidVTableIndex;
+        switch (@typeInfo(T)) {
+            .Optional => return null,
+            .Pointer => |p| if (p.size == .Slice) return &.{},
+            else => {},
+        }
+        return Error.InvalidVTableIndex;
     }
 
     pub fn readFieldWithDefault(self: Self, comptime T: type, id: VOffset, default: T) Error!T {
