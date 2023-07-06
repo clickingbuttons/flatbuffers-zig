@@ -70,8 +70,8 @@ pub const ChildType = union(enum) {
 };
 
 pub const Type = struct {
-    base_type: types.BaseType = @intToEnum(types.BaseType, 0),
-    element: types.BaseType = @intToEnum(types.BaseType, 0),
+    base_type: types.BaseType = .none,
+    element: types.BaseType = .none,
     index: i32 = -1,
     fixed_length: u16 = 0,
     base_size: u32 = 4,
@@ -117,13 +117,17 @@ pub const Type = struct {
                 return next_type.child(schema);
             },
             .obj => {
-                if (self.index != -1)
-                    return ChildType{ .object = schema.objects[@intCast(usize, self.index)] };
+                if (self.index >= 0) {
+                    const index: usize = @intCast(self.index);
+                    return ChildType{ .object = schema.objects[index] };
+                }
             },
             // Sometimes integer types are disguised as enums
             .utype, .@"union", .byte, .ubyte, .short, .ushort, .int, .uint, .long, .ulong => {
-                if (self.index != -1)
-                    return ChildType{ .@"enum" = schema.enums[@intCast(usize, self.index)] };
+                if (self.index >= 0) {
+                    const index: usize = @intCast(self.index);
+                    return ChildType{ .@"enum" = schema.enums[index] };
+                }
             },
             else => {},
         }
@@ -146,6 +150,7 @@ pub const Type = struct {
                 if (self.child(schema)) |c| {
                     if (c.type().base_type == .string) return true;
                     if (!c.type().base_type.isScalar()) return true;
+                    if (c.type().base_type.size() != 1) return true;
                 }
             },
             .obj => {
@@ -185,11 +190,11 @@ pub const PackedType = struct {
     }
 
     pub fn baseType(self: Self) !types.BaseType {
-        return self.table.readFieldWithDefault(types.BaseType, 0, @intToEnum(types.BaseType, 0));
+        return self.table.readFieldWithDefault(types.BaseType, 0, .none);
     }
 
     pub fn element(self: Self) !types.BaseType {
-        return self.table.readFieldWithDefault(types.BaseType, 1, @intToEnum(types.BaseType, 0));
+        return self.table.readFieldWithDefault(types.BaseType, 1, .none);
     }
 
     pub fn index(self: Self) !i32 {

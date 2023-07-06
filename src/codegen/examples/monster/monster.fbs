@@ -11,8 +11,8 @@ table Monster {
 	hp:short = 100;
 	name:string;
 	friendly:bool = false (deprecated);
-	inventory:[ubyte];
-	color:Color = Blue;
+	inventory:[int16];
+	color:Color = Green;
 	weapons:[Weapon];
 	equipped:Equipment;
 	path:[Vec3];

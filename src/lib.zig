@@ -22,7 +22,7 @@ pub fn unpackVector(
     const PackedT = @TypeOf(packed_);
     const getter = @field(PackedT, getter_name);
 
-    // 1. Vector of scalar (type has getter that returns align(1) slice)
+    // 1. Vector of scalar (type has getter that returns a slice)
     // We call this just to fix alignment.
     if (comptime isScalar(T)) {
         const arr = try getter(packed_);
@@ -40,13 +40,13 @@ pub fn unpackVector(
         const has_allocator = comptime hasAllocator(T);
         for (res, 0..) |*r, i| r.* = if (has_allocator)
             // 2. Vector of object (with allocations)
-            try T.init(allocator, try getter(packed_, @intCast(u32, i)))
+            try T.init(allocator, try getter(packed_, i))
         else
             // 3. Vector of object (no allocations)
-            try T.init(try getter(packed_, @intCast(u32, i)));
+            try T.init(try getter(packed_, i));
     } else {
         // 4. Vector of string (no allocations)
-        for (res, 0..) |*r, i| r.* = try getter(packed_, @intCast(u32, i));
+        for (res, 0..) |*r, i| r.* = try getter(packed_, i);
     }
     return res;
 }

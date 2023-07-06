@@ -52,8 +52,8 @@ pub const Table = struct {
     }
 
     fn signedAdd(a: Offset, b: i32) Offset {
-        const signed = @bitCast(i32, a) + b;
-        return @bitCast(Offset, signed);
+        const signed = @as(i32, @bitCast(a)) + b;
+        return @as(Offset, @bitCast(signed));
     }
 
     fn readAt(self: Self, comptime T: type, offset_: Offset) !T {
@@ -87,11 +87,7 @@ pub const Table = struct {
                 const len = try self.readAt(Offset, offset);
                 const bytes = try self.checkedSlice(offset + @sizeOf(Offset), len * @sizeOf(p.child));
 
-                if (p.sentinel) |s_ptr| { // Probably a string
-                    const s = @ptrCast(*align(1) const p.child, s_ptr).*;
-                    return @ptrCast([:s]p.child, bytes);
-                }
-                return std.mem.bytesAsSlice(p.child, bytes);
+                return @ptrCast(std.mem.bytesAsSlice(p.child, bytes));
             },
             else => {},
         }
@@ -104,16 +100,16 @@ pub const Table = struct {
         return try self.readAt(T, offset + self.offset);
     }
 
-    fn vtable(self: Self) ![]VOffset {
+    fn vtable(self: Self) ![]align(1) VOffset {
         const vtable_offset = try self.readAt(i32, self.offset);
         const vtable_loc = signedAdd(self.offset, -vtable_offset);
         const vtable_len = try readVOffset(try self.checkedSlice(vtable_loc, @sizeOf(VOffset)));
         if (vtable_len > self.flatbuffer.len) return Error.PrematureVTableEnd;
         const bytes = try self.checkedSlice(vtable_loc, vtable_len);
-        if (@ptrToInt(&self.flatbuffer[vtable_loc]) % @alignOf(VOffset) != 0) {
+        if (@intFromPtr(&self.flatbuffer[vtable_loc]) % @alignOf(VOffset) != 0) {
             return Error.InvalidAlignment;
         }
-        return @alignCast(@alignOf(VOffset), std.mem.bytesAsSlice(VOffset, bytes));
+        return std.mem.bytesAsSlice(VOffset, bytes);
     }
 
     fn table(self: Self) ![]u8 {
@@ -178,7 +174,7 @@ pub const Table = struct {
         offset += try self.readAt(Offset, offset);
         const len = try self.readAt(Offset, offset);
 
-        const index = @intCast(Offset, index_);
+        const index: Offset = @intCast(index_);
         if (index >= len) return Error.InvalidIndex;
         offset += @sizeOf(Offset);
 

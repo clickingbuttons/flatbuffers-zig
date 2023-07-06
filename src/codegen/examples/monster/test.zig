@@ -18,7 +18,7 @@ const example_monster = Monster{
     .mana = 100,
     .hp = 200,
     .name = "orc",
-    .inventory = @constCast(&[_]u8{ 1, 2, 3 }),
+    .inventory = @constCast(&[_]i16{ 1, 2 }),
     .color = .green,
     .weapons = @constCast(&[_]Weapon{
         .{
@@ -60,7 +60,8 @@ fn testPackedMonster(monster: PackedMonster) !void {
     try testing.expectEqual(@as(i16, 100), try monster.mana());
     try testing.expectEqual(@as(i16, 200), try monster.hp());
     try testing.expectEqualStrings(@as([:0]u8, @constCast(&"orc".*)), try monster.name());
-    try testing.expectEqualSlices(u8, &[_]u8{ 1, 2, 3 }, try monster.inventory());
+    try testing.expectEqual(@as(i16, 1), (try monster.inventory())[0]);
+    try testing.expectEqual(@as(i16, 2), (try monster.inventory())[1]);
     try testing.expectEqual(Color.green, try monster.color());
     try testing.expectEqual(@as(u32, 2), try monster.weaponsLen());
 

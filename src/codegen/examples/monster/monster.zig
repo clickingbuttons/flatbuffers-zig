@@ -56,8 +56,8 @@ pub const Monster = struct {
     mana: i16 = 150,
     hp: i16 = 100,
     name: [:0]const u8,
-    inventory: []u8,
-    color: Color = @intToEnum(Color, 2),
+    inventory: []i16,
+    color: Color = .green,
     weapons: []Weapon,
     equipped: Equipment,
     path: []Vec3,
@@ -71,7 +71,7 @@ pub const Monster = struct {
             .mana = try packed_.mana(),
             .hp = try packed_.hp(),
             .name = try packed_.name(),
-            .inventory = try packed_.inventory(),
+            .inventory = try flatbuffers.unpackVector(allocator, i16, packed_, "inventory"),
             .color = try packed_.color(),
             .weapons = try flatbuffers.unpackVector(allocator, Weapon, packed_, "weapons"),
             .equipped = try Equipment.init(allocator, try packed_.equipped()),
@@ -81,6 +81,7 @@ pub const Monster = struct {
     }
 
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+        allocator.free(self.inventory);
         for (self.weapons) |w| w.deinit(allocator);
         allocator.free(self.weapons);
         self.equipped.deinit(allocator);
@@ -90,7 +91,7 @@ pub const Monster = struct {
     pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
         const field_offsets = .{
             .name = try builder.prependString(self.name),
-            .inventory = try builder.prependVector(u8, self.inventory),
+            .inventory = try builder.prependVector(i16, self.inventory),
             .weapons = try builder.prependVectorOffsets(Weapon, self.weapons),
             .equipped = try self.equipped.pack(builder),
             .path = try builder.prependVector(Vec3, self.path),
@@ -138,12 +139,12 @@ pub const PackedMonster = struct {
         return self.table.readField([:0]const u8, 3);
     }
 
-    pub fn inventory(self: Self) ![]align(1) u8 {
-        return self.table.readField([]align(1) u8, 5);
+    pub fn inventory(self: Self) ![]align(1) i16 {
+        return self.table.readField([]align(1) i16, 5);
     }
 
     pub fn color(self: Self) !Color {
-        return self.table.readFieldWithDefault(Color, 6, @intToEnum(Color, 2));
+        return self.table.readFieldWithDefault(Color, 6, .green);
     }
 
     pub fn weaponsLen(self: Self) !u32 {
@@ -154,7 +155,7 @@ pub const PackedMonster = struct {
     }
 
     pub fn equippedType(self: Self) !PackedEquipment.Tag {
-        return self.table.readFieldWithDefault(PackedEquipment.Tag, 8, @intToEnum(PackedEquipment.Tag, 0));
+        return self.table.readFieldWithDefault(PackedEquipment.Tag, 8, .none);
     }
 
     pub fn equipped(self: Self) !PackedEquipment {

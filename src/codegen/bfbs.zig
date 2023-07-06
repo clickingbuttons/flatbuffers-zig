@@ -12,8 +12,8 @@ pub const Error = error{
 pub fn bfbs(allocator: Allocator, include: []const u8, fname: []const u8) ![]const u8 {
     var argv = std.ArrayList([]const u8).init(allocator);
     defer argv.deinit();
+    try argv.append(build_options.flatc_exe_path);
     try argv.appendSlice(&.{
-        build_options.flatc_exe_path,
         "--binary",
         "--schema",
         "--bfbs-comments",

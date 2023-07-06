@@ -15,6 +15,7 @@ pub const Builder = struct {
     buffer: BackwardsBuffer,
     vtable: VTable,
     table_start: Offset = 0,
+    // TODO: output this
     min_alignment: usize = 1,
     nested: bool = false,
 
@@ -30,15 +31,16 @@ pub const Builder = struct {
     }
 
     pub fn offset(self: Self) Offset {
-        return @intCast(Offset, self.buffer.data.len);
+        return @as(Offset, @intCast(self.buffer.data.len));
     }
 
     fn prepAdvanced(self: *Self, size: usize, n_bytes_after: usize) !void {
         if (size > self.min_alignment) self.min_alignment = size;
 
-        const buf_size = self.buffer.data.len + n_bytes_after;
-        const align_size = (~@intCast(i64, buf_size) + 1) & (@intCast(i64, size) - 1);
-        try self.buffer.fill(@intCast(usize, align_size), 0);
+        const buf_size: i64 = @intCast(self.buffer.data.len + n_bytes_after);
+        const sizei: i64 = @intCast(size);
+        const align_size: usize = @intCast((~buf_size + 1) & (sizei - 1));
+        try self.buffer.fill(align_size, 0);
     }
 
     fn prep(self: *Self, comptime T: type, n_bytes_after: usize) !void {
@@ -62,7 +64,8 @@ pub const Builder = struct {
         try self.prep(Offset, n_bytes);
         try self.prep(T, n_bytes);
         try self.buffer.prependSlice(std.mem.sliceAsBytes(slice));
-        try self.buffer.prepend(@intCast(Offset, slice.len));
+        const len: Offset = @intCast(slice.len);
+        try self.buffer.prepend(len);
         return self.offset();
     }
 
@@ -79,7 +82,8 @@ pub const Builder = struct {
             const index = offsets.len - i - 1;
             try self.buffer.prepend(self.offset() - offsets[index] + @sizeOf(Offset));
         }
-        try self.buffer.prepend(@intCast(Offset, offsets.len));
+        const len: Offset = @intCast(offsets.len);
+        try self.buffer.prepend(len);
         return self.offset();
     }
 
@@ -99,7 +103,7 @@ pub const Builder = struct {
             try self.prep(Offset, str.len + 1);
             try self.buffer.prepend(@as(u8, 0));
             try self.buffer.prependSlice(str);
-            const len = @intCast(Offset, str.len);
+            const len: Offset = @intCast(str.len);
             try self.buffer.prepend(len);
             return self.offset();
         }
@@ -116,7 +120,8 @@ pub const Builder = struct {
             try self.vtable.append(@as(VOffset, 0));
         } else {
             try self.prepend(value);
-            try self.vtable.append(@intCast(VOffset, self.offset()));
+            const voffset: VOffset = @intCast(self.offset());
+            try self.vtable.append(voffset);
         }
     }
 
@@ -126,27 +131,30 @@ pub const Builder = struct {
         } else {
             try self.prep(Offset, 0); // The offset we write needs to include padding
             try self.prepend(self.offset() - offset_ + @sizeOf(Offset));
-            try self.vtable.append(@intCast(VOffset, self.offset()));
+            const voffset: VOffset = @intCast(self.offset());
+            try self.vtable.append(voffset);
         }
     }
 
     fn writeVTable(self: *Self) !Offset {
         const n_items = self.vtable.items.len;
-        const vtable_len = @intCast(i32, (n_items + 2) * @sizeOf(VOffset));
+        const vtable_len: VOffset = @intCast((n_items + 2) * @sizeOf(VOffset));
 
         // You usually want to reference the start of the table, not the start of the vtable.
-        try self.prepend(@intCast(Offset, vtable_len)); // offset to start of vtable
+        try self.prepend(@as(Offset, vtable_len)); // offset to start of vtable
         const vtable_start = self.offset();
         for (0..n_items) |i| {
             const offset_ = self.vtable.items[n_items - i - 1];
             if (offset_ == 0) {
                 try self.prepend(offset_);
             } else {
-                try self.prepend(@intCast(VOffset, vtable_start - offset_));
+                const voffset: VOffset = @intCast(vtable_start - offset_);
+                try self.prepend(voffset);
             }
         }
-        try self.prepend(@intCast(VOffset, vtable_start - self.table_start)); // table len
-        try self.prepend(@intCast(VOffset, vtable_len)); // vtable len
+        const table_len: VOffset = @intCast(vtable_start - self.table_start);
+        try self.prepend(table_len);
+        try self.prepend(@as(VOffset, @intCast(vtable_len)));
 
         return vtable_start;
     }
@@ -183,7 +191,7 @@ test "prepend slice" {
     const T = i16;
     const slice = &[_]T{ 9, 8, 1 };
     try builder.prependSlice(T, slice);
-    const actual = std.mem.bytesAsSlice(T, @alignCast(@alignOf(T), builder.buffer.data));
+    const actual: []T = @alignCast(std.mem.bytesAsSlice(T, builder.buffer.data));
     try testing.expectEqualSlices(T, slice, actual);
 }
 
@@ -194,7 +202,7 @@ test "prepend vector" {
     const T = u32;
     const slice = &[_]T{ 9, 8, 1 };
     _ = try builder.prependVector(T, slice);
-    const actual = std.mem.bytesAsSlice(T, @alignCast(@alignOf(T), builder.buffer.data));
+    const actual: []T = @alignCast(std.mem.bytesAsSlice(T, builder.buffer.data));
     try testing.expectEqualSlices(T, [_]Offset{slice.len} ++ slice, actual);
 }
 
@@ -380,7 +388,7 @@ pub fn exampleMonster(allocator: Allocator) ![]u8 {
     const weapon1 = try exampleWeapon(&builder, "axe", 23);
 
     const monster_name = try builder.prependString("orc");
-    const inventory = try builder.prependVector(u8, &[_]u8{ 1, 2, 3 });
+    const inventory = try builder.prependVector(i16, &[_]i16{ 1, 2 });
     const weapons = try builder.prependOffsets(@constCast(&[_]Offset{ weapon0, weapon1 }));
     const path = try builder.prependVector(Vec3, &[_]Vec3{ .{ .x = 1, .y = 2, .z = 3 }, .{ .x = 4, .y = 5, .z = 6 } });
 
@@ -447,9 +455,9 @@ test "build monster" {
         0, 0, 0, 0, // padding
         0x34, 0, 0, 0, // offset to field `path` (vector)
         0xB8, 0, 0, 0, // offset to field `equipped` (union of type `Weapon`)
-        0, 0, 0, @enumToInt(Equipment.weapon), // equipped_type
+        0, 0, 0, @intFromEnum(Equipment.weapon), // equipped_type
         0x44, 0, 0, 0, // offset to field `weapons` (vector)
-        0, 0, 0, @enumToInt(Color.green), // table field `color` (Byte)
+        0, 0, 0, @intFromEnum(Color.green), // table field `color` (Byte)
         0x48, 0, 0, 0, // offset to field `inventory` (vector)
         0x4C, 0, 0, 0, // offset to field `name` (string)
         0xC8, 0, // table field `hp` (Short)
@@ -475,11 +483,9 @@ test "build monster" {
         0x20, 0, 0, 0, // offset to table[1]
 
         // vector (Monster.inventory):
-        0x03, 0, 0, 0, // length of vector (# items)
-        0x01, // value[0]
-        0x02, // value[1]
-        0x03, // value[2]
-        0, // padding
+        0x02, 0, 0, 0, // length of vector (# items)
+        0x01, 0, // value[0]
+        0x02, 0, // value[1]
 
         // string (Monster.name):
         0x03, 0, 0, 0, // length of string

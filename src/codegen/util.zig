@@ -66,7 +66,7 @@ pub fn toSnakeCase(writer: anytype, input: []const u8) !void {
 
 pub fn strcmp(context: void, a: []const u8, b: []const u8) bool {
     _ = context;
-    for (0..std.math.min(a.len, b.len)) |i| if (a[i] < b[i]) return true;
+    for (0..@min(a.len, b.len)) |i| if (a[i] < b[i]) return true;
     return false;
 }
 

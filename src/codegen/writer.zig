@@ -449,10 +449,18 @@ pub const CodeWriter = struct {
                 // Check for an enum
                 if (field.type.child(self.schema)) |child| {
                     switch (child) {
-                        .@"enum" => |e| if (e.isBitFlags()) break :brk try self.allocPrint(".{{}}", .{}),
+                        .@"enum" => |e| {
+                            if (e.isBitFlags()) break :brk try self.allocPrint(".{{}}", .{});
+                            for (e.values) |v| {
+                                if (v.value == default_int) {
+                                    const tag_name = try self.getTagName(v.name);
+                                    break :brk try self.allocPrint(".{s}", .{tag_name});
+                                }
+                            }
+                            log.warn("ignoring non-existant default value {d} for enum {s}", .{ default_int, e.name });
+                        },
                         else => |t| log.warn("scalar type {any} has non-enum child {any}", .{ t, child }),
                     }
-                    break :brk try self.allocPrint("@intToEnum({s}, {d})", .{ try self.getType(field.type), default_int });
                 }
                 break :brk try self.allocPrint("{d}", .{default_int});
             },

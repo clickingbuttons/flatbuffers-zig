@@ -110,6 +110,8 @@ pub const PackedSchema = struct {
         return self.table.readFieldWithDefault(types.AdvancedFeatures, 6, .{});
     }
 
+    /// All the files used in this compilation. Files are relative to where
+    /// flatc was invoked.
     pub fn fbsFilesLen(self: Self) !u32 {
         return self.table.readFieldVectorLen(7);
     }
