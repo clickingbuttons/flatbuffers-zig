@@ -19,7 +19,10 @@
 		- [x] fix packing strings
 		- [x] fix monster codegen
 		- [x] fix schema leaks (attributes)
-		- [ ] union with objects that allocate
+		- [x] union with objects that allocate
+		- [ ] args with modules in types
+	- [ ] use in arrow
+	- [ ] docs
 options:
 - [x] casing for function names
 - [ ] setters
