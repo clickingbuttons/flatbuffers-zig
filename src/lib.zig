@@ -4,6 +4,7 @@ pub const exampleMonster = @import("./builder.zig").exampleMonster;
 pub const Table = @import("./table.zig").Table;
 
 pub const isScalar = Table.isScalar;
+pub const Error = Table.Error || std.mem.Allocator.Error;
 
 pub fn hasAllocator(comptime T: type) bool {
     if (@typeInfo(T) == .Struct and @hasDecl(T, "init")) {
@@ -18,7 +19,7 @@ pub fn unpackVector(
     comptime T: type,
     packed_: anytype,
     comptime getter_name: []const u8,
-) ![]T {
+) Error![]T {
     const PackedT = @TypeOf(packed_);
     const getter = @field(PackedT, getter_name);
 

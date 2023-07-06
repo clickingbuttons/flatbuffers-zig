@@ -15,7 +15,7 @@ pub const Equipment = union(PackedEquipment.Tag) {
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, packed_: PackedEquipment) !Self {
+    pub fn init(allocator: std.mem.Allocator, packed_: PackedEquipment) flatbuffers.Error!Self {
         return switch (packed_) {
             .none => .none,
             .weapon => |w| .{ .weapon = try Weapon.init(allocator, w) },
@@ -31,7 +31,7 @@ pub const Equipment = union(PackedEquipment.Tag) {
         }
     }
 
-    pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
+    pub fn pack(self: Self, builder: *flatbuffers.Builder) flatbuffers.Error!u32 {
         switch (self) {
             inline else => |v| {
                 if (comptime flatbuffers.isScalar(@TypeOf(v))) {
@@ -65,7 +65,7 @@ pub const Monster = struct {
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, packed_: PackedMonster) !Self {
+    pub fn init(allocator: std.mem.Allocator, packed_: PackedMonster) flatbuffers.Error!Self {
         return .{
             .pos = try packed_.pos(),
             .mana = try packed_.mana(),
@@ -88,7 +88,7 @@ pub const Monster = struct {
         allocator.free(self.path);
     }
 
-    pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
+    pub fn pack(self: Self, builder: *flatbuffers.Builder) flatbuffers.Error!u32 {
         const field_offsets = .{
             .name = try builder.prependString(self.name),
             .inventory = try builder.prependVector(i16, self.inventory),
@@ -119,46 +119,46 @@ pub const PackedMonster = struct {
 
     const Self = @This();
 
-    pub fn init(size_prefixed_bytes: []u8) !Self {
+    pub fn init(size_prefixed_bytes: []u8) flatbuffers.Error!Self {
         return .{ .table = try flatbuffers.Table.init(size_prefixed_bytes) };
     }
 
-    pub fn pos(self: Self) !?Vec3 {
+    pub fn pos(self: Self) flatbuffers.Error!?Vec3 {
         return self.table.readField(?Vec3, 0);
     }
 
-    pub fn mana(self: Self) !i16 {
+    pub fn mana(self: Self) flatbuffers.Error!i16 {
         return self.table.readFieldWithDefault(i16, 1, 150);
     }
 
-    pub fn hp(self: Self) !i16 {
+    pub fn hp(self: Self) flatbuffers.Error!i16 {
         return self.table.readFieldWithDefault(i16, 2, 100);
     }
 
-    pub fn name(self: Self) ![:0]const u8 {
+    pub fn name(self: Self) flatbuffers.Error![:0]const u8 {
         return self.table.readField([:0]const u8, 3);
     }
 
-    pub fn inventory(self: Self) ![]align(1) i16 {
+    pub fn inventory(self: Self) flatbuffers.Error![]align(1) i16 {
         return self.table.readField([]align(1) i16, 5);
     }
 
-    pub fn color(self: Self) !Color {
+    pub fn color(self: Self) flatbuffers.Error!Color {
         return self.table.readFieldWithDefault(Color, 6, .green);
     }
 
-    pub fn weaponsLen(self: Self) !u32 {
+    pub fn weaponsLen(self: Self) flatbuffers.Error!u32 {
         return self.table.readFieldVectorLen(7);
     }
-    pub fn weapons(self: Self, index: usize) !PackedWeapon {
+    pub fn weapons(self: Self, index: usize) flatbuffers.Error!PackedWeapon {
         return self.table.readFieldVectorItem(PackedWeapon, 7, index);
     }
 
-    pub fn equippedType(self: Self) !PackedEquipment.Tag {
+    pub fn equippedType(self: Self) flatbuffers.Error!PackedEquipment.Tag {
         return self.table.readFieldWithDefault(PackedEquipment.Tag, 8, .none);
     }
 
-    pub fn equipped(self: Self) !PackedEquipment {
+    pub fn equipped(self: Self) flatbuffers.Error!PackedEquipment {
         return switch (try self.equippedType()) {
             inline else => |tag| {
                 var result = @unionInit(PackedEquipment, @tagName(tag), undefined);
@@ -169,11 +169,11 @@ pub const PackedMonster = struct {
         };
     }
 
-    pub fn path(self: Self) ![]align(1) Vec3 {
+    pub fn path(self: Self) flatbuffers.Error![]align(1) Vec3 {
         return self.table.readField([]align(1) Vec3, 10);
     }
 
-    pub fn rotation(self: Self) !?Vec4 {
+    pub fn rotation(self: Self) flatbuffers.Error!?Vec4 {
         return self.table.readField(?Vec4, 11);
     }
 };
@@ -195,7 +195,7 @@ pub const Weapon = struct {
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, packed_: PackedWeapon) !Self {
+    pub fn init(allocator: std.mem.Allocator, packed_: PackedWeapon) flatbuffers.Error!Self {
         return .{
             .name = try packed_.name(),
             .damage = try packed_.damage(),
@@ -207,7 +207,7 @@ pub const Weapon = struct {
         allocator.free(self.owners);
     }
 
-    pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
+    pub fn pack(self: Self, builder: *flatbuffers.Builder) flatbuffers.Error!u32 {
         const field_offsets = .{
             .name = try builder.prependString(self.name),
             .owners = try builder.prependVectorOffsets([:0]const u8, self.owners),
@@ -226,22 +226,22 @@ pub const PackedWeapon = struct {
 
     const Self = @This();
 
-    pub fn init(size_prefixed_bytes: []u8) !Self {
+    pub fn init(size_prefixed_bytes: []u8) flatbuffers.Error!Self {
         return .{ .table = try flatbuffers.Table.init(size_prefixed_bytes) };
     }
 
-    pub fn name(self: Self) ![:0]const u8 {
+    pub fn name(self: Self) flatbuffers.Error![:0]const u8 {
         return self.table.readField([:0]const u8, 0);
     }
 
-    pub fn damage(self: Self) !i16 {
+    pub fn damage(self: Self) flatbuffers.Error!i16 {
         return self.table.readFieldWithDefault(i16, 1, 0);
     }
 
-    pub fn ownersLen(self: Self) !u32 {
+    pub fn ownersLen(self: Self) flatbuffers.Error!u32 {
         return self.table.readFieldVectorLen(2);
     }
-    pub fn owners(self: Self, index: usize) ![:0]const u8 {
+    pub fn owners(self: Self, index: usize) flatbuffers.Error![:0]const u8 {
         return self.table.readFieldVectorItem([:0]const u8, 2, index);
     }
 };

@@ -282,7 +282,7 @@ pub const CodeWriter = struct {
             try writer.print("{s}: {s}", .{ arg.name, arg.type });
             if (i != args.len - 1) try writer.writeByte(',');
         }
-        try writer.print(") {s}{s} {{", .{ if (return_error) "!" else "", return_type });
+        try writer.print(") {s}{s} {{", .{ if (return_error) "flatbuffers.Error!" else "", return_type });
     }
 
     fn writeObjectFieldScalarFns(

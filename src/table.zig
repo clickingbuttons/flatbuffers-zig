@@ -6,26 +6,6 @@ const Offset = types.Offset;
 const VOffset = types.VOffset;
 const log = types.log;
 
-const Error = error{
-    InvalidOffset,
-    InvalidAlignment,
-    InvalidIndex,
-    InvalidVTableIndex,
-    PrematureEnd,
-    PrematureVTableEnd,
-    MissingField,
-};
-
-fn readVOffset(bytes: []u8) !VOffset {
-    if (bytes.len < @sizeOf(VOffset)) return Error.PrematureEnd;
-    return std.mem.readIntLittle(VOffset, bytes[0..@sizeOf(VOffset)]);
-}
-
-fn readOffset(bytes: []u8) !Offset {
-    if (bytes.len < @sizeOf(Offset)) return Error.PrematureEnd;
-    return std.mem.readIntLittle(Offset, bytes[0..@sizeOf(Offset)]);
-}
-
 pub const Table = struct {
     // We could have a single pointer, but then we can't bounds check offsets to prevent segfaults on
     // invalid flatbuffers.
@@ -34,12 +14,32 @@ pub const Table = struct {
 
     const Self = @This();
 
-    pub fn init(size_prefixed_bytes: []u8) !Self {
+    pub const Error = error{
+        InvalidOffset,
+        InvalidAlignment,
+        InvalidIndex,
+        InvalidVTableIndex,
+        PrematureEnd,
+        PrematureVTableEnd,
+        MissingField,
+    };
+
+    fn readVOffset(bytes: []u8) Error!VOffset {
+        if (bytes.len < @sizeOf(VOffset)) return Error.PrematureEnd;
+        return std.mem.readIntLittle(VOffset, bytes[0..@sizeOf(VOffset)]);
+    }
+
+    fn readOffset(bytes: []u8) Error!Offset {
+        if (bytes.len < @sizeOf(Offset)) return Error.PrematureEnd;
+        return std.mem.readIntLittle(Offset, bytes[0..@sizeOf(Offset)]);
+    }
+
+    pub fn init(size_prefixed_bytes: []u8) Error!Self {
         const offset = try readOffset(size_prefixed_bytes);
         return .{ .flatbuffer = size_prefixed_bytes, .offset = offset };
     }
 
-    fn checkedSlice(self: Self, offset: Offset, len: Offset) ![]u8 {
+    fn checkedSlice(self: Self, offset: Offset, len: Offset) Error![]u8 {
         if (offset + len > self.flatbuffer.len) {
             log.err("offset {d} + len {d} > total flatbuffer len {d}", .{
                 offset,
@@ -56,7 +56,7 @@ pub const Table = struct {
         return @as(Offset, @bitCast(signed));
     }
 
-    fn readAt(self: Self, comptime T: type, offset_: Offset) !T {
+    fn readAt(self: Self, comptime T: type, offset_: Offset) Error!T {
         var offset = offset_;
         const Child = switch (@typeInfo(T)) {
             .Optional => |o| o.child,
@@ -94,13 +94,13 @@ pub const Table = struct {
         @compileError(std.fmt.comptimePrint("invalid type {any}", .{T}));
     }
 
-    fn readTableAt(self: Self, comptime T: type, offset: Offset) !T {
+    fn readTableAt(self: Self, comptime T: type, offset: Offset) Error!T {
         if (offset == 0) return if (@typeInfo(T) == .Optional) null else Error.MissingField;
 
         return try self.readAt(T, offset + self.offset);
     }
 
-    fn vtable(self: Self) ![]align(1) VOffset {
+    fn vtable(self: Self) Error![]align(1) VOffset {
         const vtable_offset = try self.readAt(i32, self.offset);
         const vtable_loc = signedAdd(self.offset, -vtable_offset);
         const vtable_len = try readVOffset(try self.checkedSlice(vtable_loc, @sizeOf(VOffset)));
@@ -112,12 +112,12 @@ pub const Table = struct {
         return std.mem.bytesAsSlice(VOffset, bytes);
     }
 
-    fn table(self: Self) ![]u8 {
+    fn table(self: Self) Error![]u8 {
         const vtable_ = try self.vtable();
         return self.checkedSlice(self.offset, vtable_[1]);
     }
 
-    fn getFieldOffset(self: Self, id: VOffset) !?Offset {
+    fn getFieldOffset(self: Self, id: VOffset) Error!?Offset {
         const vtable_ = try self.vtable();
         const index = id + 2;
 
@@ -142,23 +142,23 @@ pub const Table = struct {
         };
     }
 
-    pub fn readField(self: Self, comptime T: type, id: VOffset) !T {
+    pub fn readField(self: Self, comptime T: type, id: VOffset) Error!T {
         if (T == void) return {};
         if (try self.getFieldOffset(id)) |offset| return self.readTableAt(T, offset);
 
         return if (@typeInfo(T) == .Optional) null else Error.InvalidVTableIndex;
     }
 
-    pub fn readFieldWithDefault(self: Self, comptime T: type, id: VOffset, default: T) !T {
+    pub fn readFieldWithDefault(self: Self, comptime T: type, id: VOffset, default: T) Error!T {
         const val = self.readField(?T, id) catch return default;
         return if (val) |v| v else default;
     }
 
-    pub fn readNullableField(self: Self, comptime T: type, id: VOffset) !T {
+    pub fn readNullableField(self: Self, comptime T: type, id: VOffset) Error!T {
         return self.readField(T, id) catch return null;
     }
 
-    pub fn readFieldVectorLen(self: Self, id: VOffset) !Offset {
+    pub fn readFieldVectorLen(self: Self, id: VOffset) Error!Offset {
         var offset = (self.getFieldOffset(id) catch @as(?u32, 0)) orelse 0;
         if (offset == 0) return 0;
         offset += self.offset;
@@ -167,7 +167,7 @@ pub const Table = struct {
         return try self.readAt(Offset, offset);
     }
 
-    pub fn readFieldVectorItem(self: Self, comptime T: type, id: VOffset, index_: usize) !T {
+    pub fn readFieldVectorItem(self: Self, comptime T: type, id: VOffset, index_: usize) Error!T {
         var offset = (self.getFieldOffset(id) catch @as(?u32, 0)) orelse 0;
         if (offset == 0) return Error.MissingField;
         offset += self.offset;
