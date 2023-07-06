@@ -20,6 +20,8 @@
 		- [x] fix monster codegen
 		- [x] fix schema leaks (attributes)
 		- [x] union with objects that allocate
+		- [x] copy out strings to unpacked types
+		- [ ] temps + errdefer in object init
 		- [ ] args with modules in types
 	- [ ] use in arrow
 	- [ ] docs

@@ -37,17 +37,18 @@ pub fn unpackVector(
     var res = try allocator.alloc(T, len);
     errdefer allocator.free(res);
 
-    if (@typeInfo(T) == .Struct and @hasDecl(T, "init")) {
+    // 2. Vector of object
+    if (@typeInfo(T) == .Struct) {
         const has_allocator = comptime hasAllocator(T);
         for (res, 0..) |*r, i| r.* = if (has_allocator)
-            // 2. Vector of object (with allocations)
             try T.init(allocator, try getter(packed_, i))
         else
-            // 3. Vector of object (no allocations)
             try T.init(try getter(packed_, i));
+    } else if (T == [:0]const u8) {
+        // 3. Vector of string
+        for (res, 0..) |*r, i| r.* = try allocator.dupeZ(u8, try getter(packed_, i));
     } else {
-        // 4. Vector of string (no allocations)
-        for (res, 0..) |*r, i| r.* = try getter(packed_, i);
+        @compileError("cannot unpack type " ++ @typeName(T));
     }
     return res;
 }

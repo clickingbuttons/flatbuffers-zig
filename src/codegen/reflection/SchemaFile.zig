@@ -12,21 +12,23 @@ pub const SchemaFile = struct {
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, packed_: PackedSchemaFile) !Self {
+    pub fn init(allocator: std.mem.Allocator, packed_: PackedSchemaFile) flatbuffers.Error!Self {
         return .{
-            .filename = try packed_.filename(),
+            .filename = try allocator.dupeZ(u8, try packed_.filename()),
             .included_filenames = try flatbuffers.unpackVector(allocator, [:0]const u8, packed_, "includedFilenames"),
         };
     }
 
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+        allocator.free(self.filename);
+        for (self.included_filenames) |i| allocator.free(i);
         allocator.free(self.included_filenames);
     }
 
-    pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
+    pub fn pack(self: Self, builder: *flatbuffers.Builder) flatbuffers.Error!u32 {
         const field_offsets = .{
-            .included_filenames = try builder.prependVectorOffsets([:0]const u8, self.included_filenames),
             .filename = try builder.prependString(self.filename),
+            .included_filenames = try builder.prependVectorOffsets([:0]const u8, self.included_filenames),
         };
 
         try builder.startTable();
@@ -44,20 +46,20 @@ pub const PackedSchemaFile = struct {
 
     const Self = @This();
 
-    pub fn init(size_prefixed_bytes: []u8) !Self {
+    pub fn init(size_prefixed_bytes: []u8) flatbuffers.Error!Self {
         return .{ .table = try flatbuffers.Table.init(size_prefixed_bytes) };
     }
 
     /// Filename, relative to project root.
-    pub fn filename(self: Self) ![:0]const u8 {
+    pub fn filename(self: Self) flatbuffers.Error![:0]const u8 {
         return self.table.readField([:0]const u8, 0);
     }
 
     /// Names of included files, relative to project root.
-    pub fn includedFilenamesLen(self: Self) !u32 {
+    pub fn includedFilenamesLen(self: Self) flatbuffers.Error!u32 {
         return self.table.readFieldVectorLen(1);
     }
-    pub fn includedFilenames(self: Self, index: usize) ![:0]const u8 {
+    pub fn includedFilenames(self: Self, index: usize) flatbuffers.Error![:0]const u8 {
         return self.table.readFieldVectorItem([:0]const u8, 1, index);
     }
 };

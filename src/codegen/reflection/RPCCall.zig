@@ -11,9 +11,9 @@ pub const RPCCall = struct {
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, packed_: PackedRPCCall) !Self {
+    pub fn init(allocator: std.mem.Allocator, packed_: PackedRPCCall) flatbuffers.Error!Self {
         return .{
-            .name = try packed_.name(),
+            .name = try allocator.dupeZ(u8, try packed_.name()),
             .request = try types.Object.init(allocator, try packed_.request()),
             .response = try types.Object.init(allocator, try packed_.response()),
             .attributes = try flatbuffers.unpackVector(allocator, types.KeyValue, packed_, "attributes"),
@@ -22,15 +22,20 @@ pub const RPCCall = struct {
     }
 
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+        allocator.free(self.name);
+        self.request.deinit(allocator);
+        self.response.deinit(allocator);
+        for (self.attributes) |a| a.deinit(allocator);
         allocator.free(self.attributes);
+        for (self.documentation) |d| allocator.free(d);
         allocator.free(self.documentation);
     }
 
-    pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
+    pub fn pack(self: Self, builder: *flatbuffers.Builder) flatbuffers.Error!u32 {
         const field_offsets = .{
-            .documentation = try builder.prependVectorOffsets([:0]const u8, self.documentation),
             .name = try builder.prependString(self.name),
             .attributes = try builder.prependVectorOffsets(types.KeyValue, self.attributes),
+            .documentation = try builder.prependVectorOffsets([:0]const u8, self.documentation),
         };
 
         try builder.startTable();
@@ -48,33 +53,33 @@ pub const PackedRPCCall = struct {
 
     const Self = @This();
 
-    pub fn init(size_prefixed_bytes: []u8) !Self {
+    pub fn init(size_prefixed_bytes: []u8) flatbuffers.Error!Self {
         return .{ .table = try flatbuffers.Table.init(size_prefixed_bytes) };
     }
 
-    pub fn name(self: Self) ![:0]const u8 {
+    pub fn name(self: Self) flatbuffers.Error![:0]const u8 {
         return self.table.readField([:0]const u8, 0);
     }
 
-    pub fn request(self: Self) !types.PackedObject {
+    pub fn request(self: Self) flatbuffers.Error!types.PackedObject {
         return self.table.readField(types.PackedObject, 1);
     }
 
-    pub fn response(self: Self) !types.PackedObject {
+    pub fn response(self: Self) flatbuffers.Error!types.PackedObject {
         return self.table.readField(types.PackedObject, 2);
     }
 
-    pub fn attributesLen(self: Self) !u32 {
+    pub fn attributesLen(self: Self) flatbuffers.Error!u32 {
         return self.table.readFieldVectorLen(3);
     }
-    pub fn attributes(self: Self, index: usize) !types.PackedKeyValue {
+    pub fn attributes(self: Self, index: usize) flatbuffers.Error!types.PackedKeyValue {
         return self.table.readFieldVectorItem(types.PackedKeyValue, 3, index);
     }
 
-    pub fn documentationLen(self: Self) !u32 {
+    pub fn documentationLen(self: Self) flatbuffers.Error!u32 {
         return self.table.readFieldVectorLen(4);
     }
-    pub fn documentation(self: Self, index: usize) ![:0]const u8 {
+    pub fn documentation(self: Self, index: usize) flatbuffers.Error![:0]const u8 {
         return self.table.readFieldVectorItem([:0]const u8, 4, index);
     }
 };

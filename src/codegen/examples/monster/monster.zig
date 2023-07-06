@@ -70,7 +70,7 @@ pub const Monster = struct {
             .pos = try packed_.pos(),
             .mana = try packed_.mana(),
             .hp = try packed_.hp(),
-            .name = try packed_.name(),
+            .name = try allocator.dupeZ(u8, try packed_.name()),
             .inventory = try flatbuffers.unpackVector(allocator, i16, packed_, "inventory"),
             .color = try packed_.color(),
             .weapons = try flatbuffers.unpackVector(allocator, Weapon, packed_, "weapons"),
@@ -81,6 +81,7 @@ pub const Monster = struct {
     }
 
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+        allocator.free(self.name);
         allocator.free(self.inventory);
         for (self.weapons) |w| w.deinit(allocator);
         allocator.free(self.weapons);
@@ -197,13 +198,15 @@ pub const Weapon = struct {
 
     pub fn init(allocator: std.mem.Allocator, packed_: PackedWeapon) flatbuffers.Error!Self {
         return .{
-            .name = try packed_.name(),
+            .name = try allocator.dupeZ(u8, try packed_.name()),
             .damage = try packed_.damage(),
             .owners = try flatbuffers.unpackVector(allocator, [:0]const u8, packed_, "owners"),
         };
     }
 
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+        allocator.free(self.name);
+        for (self.owners) |o| allocator.free(o);
         allocator.free(self.owners);
     }
 

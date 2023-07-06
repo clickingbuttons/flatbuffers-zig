@@ -648,10 +648,9 @@ pub const CodeWriter = struct {
             const arg_index: usize = if (has_allocations) 1 else 0;
 
             switch (field.type.base_type) {
-                .vector => |t| brk: {
+                .vector => |t| {
                     const module_name = try self.putDeclaration(self.opts.module_name, self.opts.module_name);
                     if (t == .vector) {
-                        if (!field.type.isAllocated(self.schema)) break :brk;
                         try writer.print(
                             \\
                             \\    .{s} = try {s}.unpackVector({s}, {s}, {s}, "{s}"),
@@ -703,6 +702,18 @@ pub const CodeWriter = struct {
                     }
                     continue;
                 },
+                .string => {
+                    try writer.print(
+                        \\
+                        \\    .{s} = try {s}.dupeZ(u8, try {s}.{s}()),
+                    , .{
+                        field_name,
+                        args.items[0].name,
+                        args.items[1].name,
+                        field_getter,
+                    });
+                    continue;
+                },
                 else => {},
             }
             try writer.print(
@@ -740,19 +751,28 @@ pub const CodeWriter = struct {
     ) !void {
         const writer = self.buffer.writer();
         switch (field_type.base_type) {
-            .vector => brk: {
-                if (!field_type.isAllocated(self.schema)) break :brk;
-                const child = field_type.child(self.schema).?;
-                if (child.isAllocated(self.schema)) {
-                    try writer.print(
-                        \\
-                        \\for ({0s}.{1s}) |{2s}| {2s}.deinit({3s});
-                    , .{
-                        self_name,
-                        field_name,
-                        try self.getTmpName(field_name[0..1]),
-                        allocator_name,
-                    });
+            .vector, .string => {
+                if (field_type.child(self.schema)) |child| {
+                    if (child.isAllocated(self.schema)) switch (child) {
+                        .scalar => try writer.print(
+                            \\
+                            \\for ({0s}.{1s}) |{2s}| {3s}.free({2s});
+                        , .{
+                            self_name,
+                            field_name,
+                            try self.getTmpName(field_name[0..1]),
+                            allocator_name,
+                        }),
+                        else => try writer.print(
+                            \\
+                            \\for ({0s}.{1s}) |{2s}| {2s}.deinit({3s});
+                        , .{
+                            self_name,
+                            field_name,
+                            try self.getTmpName(field_name[0..1]),
+                            allocator_name,
+                        }),
+                    };
                 }
                 try writer.print(
                     \\

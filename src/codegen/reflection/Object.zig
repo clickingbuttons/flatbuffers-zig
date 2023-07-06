@@ -15,32 +15,36 @@ pub const Object = struct {
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, packed_: PackedObject) !Self {
+    pub fn init(allocator: std.mem.Allocator, packed_: PackedObject) flatbuffers.Error!Self {
         return .{
-            .name = try packed_.name(),
+            .name = try allocator.dupeZ(u8, try packed_.name()),
             .fields = try flatbuffers.unpackVector(allocator, types.Field, packed_, "fields"),
             .is_struct = try packed_.isStruct(),
             .minalign = try packed_.minalign(),
             .bytesize = try packed_.bytesize(),
             .attributes = try flatbuffers.unpackVector(allocator, types.KeyValue, packed_, "attributes"),
             .documentation = try flatbuffers.unpackVector(allocator, [:0]const u8, packed_, "documentation"),
-            .declaration_file = try packed_.declarationFile(),
+            .declaration_file = try allocator.dupeZ(u8, try packed_.declarationFile()),
         };
     }
 
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+        allocator.free(self.name);
         for (self.fields) |f| f.deinit(allocator);
         allocator.free(self.fields);
+        for (self.attributes) |a| a.deinit(allocator);
         allocator.free(self.attributes);
+        for (self.documentation) |d| allocator.free(d);
         allocator.free(self.documentation);
+        allocator.free(self.declaration_file);
     }
 
-    pub fn pack(self: Self, builder: *flatbuffers.Builder) !u32 {
+    pub fn pack(self: Self, builder: *flatbuffers.Builder) flatbuffers.Error!u32 {
         const field_offsets = .{
-            .fields = try builder.prependVectorOffsets(types.Field, self.fields),
-            .documentation = try builder.prependVectorOffsets([:0]const u8, self.documentation),
             .name = try builder.prependString(self.name),
+            .fields = try builder.prependVectorOffsets(types.Field, self.fields),
             .attributes = try builder.prependVectorOffsets(types.KeyValue, self.attributes),
+            .documentation = try builder.prependVectorOffsets([:0]const u8, self.documentation),
             .declaration_file = try builder.prependString(self.declaration_file),
         };
 
@@ -75,49 +79,49 @@ pub const PackedObject = struct {
 
     const Self = @This();
 
-    pub fn init(size_prefixed_bytes: []u8) !Self {
+    pub fn init(size_prefixed_bytes: []u8) flatbuffers.Error!Self {
         return .{ .table = try flatbuffers.Table.init(size_prefixed_bytes) };
     }
 
-    pub fn name(self: Self) ![:0]const u8 {
+    pub fn name(self: Self) flatbuffers.Error![:0]const u8 {
         return self.table.readField([:0]const u8, 0);
     }
 
-    pub fn fieldsLen(self: Self) !u32 {
+    pub fn fieldsLen(self: Self) flatbuffers.Error!u32 {
         return self.table.readFieldVectorLen(1);
     }
-    pub fn fields(self: Self, index: usize) !types.PackedField {
+    pub fn fields(self: Self, index: usize) flatbuffers.Error!types.PackedField {
         return self.table.readFieldVectorItem(types.PackedField, 1, index);
     }
 
-    pub fn isStruct(self: Self) !bool {
+    pub fn isStruct(self: Self) flatbuffers.Error!bool {
         return self.table.readFieldWithDefault(bool, 2, false);
     }
 
-    pub fn minalign(self: Self) !i32 {
+    pub fn minalign(self: Self) flatbuffers.Error!i32 {
         return self.table.readFieldWithDefault(i32, 3, 0);
     }
 
-    pub fn bytesize(self: Self) !i32 {
+    pub fn bytesize(self: Self) flatbuffers.Error!i32 {
         return self.table.readFieldWithDefault(i32, 4, 0);
     }
 
-    pub fn attributesLen(self: Self) !u32 {
+    pub fn attributesLen(self: Self) flatbuffers.Error!u32 {
         return self.table.readFieldVectorLen(5);
     }
-    pub fn attributes(self: Self, index: usize) !types.PackedKeyValue {
+    pub fn attributes(self: Self, index: usize) flatbuffers.Error!types.PackedKeyValue {
         return self.table.readFieldVectorItem(types.PackedKeyValue, 5, index);
     }
 
-    pub fn documentationLen(self: Self) !u32 {
+    pub fn documentationLen(self: Self) flatbuffers.Error!u32 {
         return self.table.readFieldVectorLen(6);
     }
-    pub fn documentation(self: Self, index: usize) ![:0]const u8 {
+    pub fn documentation(self: Self, index: usize) flatbuffers.Error![:0]const u8 {
         return self.table.readFieldVectorItem([:0]const u8, 6, index);
     }
 
     /// File that this Object is declared in.
-    pub fn declarationFile(self: Self) ![:0]const u8 {
+    pub fn declarationFile(self: Self) flatbuffers.Error![:0]const u8 {
         return self.table.readField([:0]const u8, 7);
     }
 };
