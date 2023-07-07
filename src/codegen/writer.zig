@@ -685,7 +685,7 @@ pub const CodeWriter = struct {
         for (object.fields) |field| {
             if (field.type.base_type == .utype or field.deprecated) continue;
 
-            const tmp_field_name = try self.getTmpName(try self.getFieldName(field.name));
+            const tmp_field_name = try self.getTmpName(field.name);
             const field_type = try self.getType(field.type);
             const field_getter = try self.getFunctionName(field.name);
             const arg_index: usize = if (has_allocations) 1 else 0;
@@ -782,7 +782,7 @@ pub const CodeWriter = struct {
             if (field.type.base_type == .utype or field.deprecated) continue;
 
             const field_name = try self.getFieldName(field.name);
-            const tmp_field_name = try self.getTmpName(field_name);
+            const tmp_field_name = try self.getTmpName(field.name);
             const field_getter = try self.getFunctionName(field.name);
             const arg_index: usize = if (has_allocations) 1 else 0;
 
