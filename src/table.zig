@@ -6,10 +6,11 @@ const Offset = types.Offset;
 const VOffset = types.VOffset;
 const log = types.log;
 
+/// A bounds-checked flatbuffer table.
 pub const Table = struct {
-    // We could have a single pointer, but then we can't bounds check offsets to prevent segfaults on
-    // invalid flatbuffers.
+    /// The entire flatbuffer, used for bounds checking.
     flatbuffer: []u8,
+    /// The offset to this table in `flatbuffer`
     offset: Offset,
 
     const Self = @This();

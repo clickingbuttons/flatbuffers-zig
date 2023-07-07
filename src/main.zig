@@ -40,8 +40,8 @@ fn walk(opts: codegen.Options) !void {
 pub fn main() !void {
     const params = comptime clap.parseParamsComptime(
         \\-h, --help                 Display this help and exit
-        \\-o, --output-dir <str>     Code generation output path
         \\-i, --input-dir <str>      Directory with .fbs files to generate code for
+        \\-o, --output-dir <str>     Code generation output path
         \\-e, --extension <str>      Extension for output files (default .zig)
         \\-m, --module-name <str>    Name of flatbuffers module (default flatbuffers)
         \\-s, --single-file          Write code to single file (default false)

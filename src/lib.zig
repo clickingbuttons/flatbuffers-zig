@@ -6,14 +6,14 @@ pub const Table = @import("./table.zig").Table;
 pub const isScalar = Table.isScalar;
 pub const Error = Table.Error || std.mem.Allocator.Error;
 
-pub fn hasAllocator(comptime T: type) bool {
+fn hasAllocator(comptime T: type) bool {
     if (@typeInfo(T) == .Struct and @hasDecl(T, "init")) {
         return @typeInfo(@TypeOf(T.init)).Fn.params.len == 2;
     }
     return false;
 }
 
-/// Caller owns returned slice.
+/// Unpacks a codegenned vector field of a flatbuffer table into a native Zig slice type. Caller owns returned slice.
 pub fn unpackVector(
     allocator: std.mem.Allocator,
     comptime T: type,

@@ -66,16 +66,37 @@ pub const Monster = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, packed_: PackedMonster) flatbuffers.Error!Self {
+        const name_ = try allocator.dupeZ(u8, try packed_.name());
+        errdefer {
+            allocator.free(name_);
+        }
+        const inventory_ = try flatbuffers.unpackVector(allocator, i16, packed_, "inventory");
+        errdefer {
+            allocator.free(inventory_);
+        }
+        const weapons_ = try flatbuffers.unpackVector(allocator, Weapon, packed_, "weapons");
+        errdefer {
+            for (weapons_) |w| w.deinit(allocator);
+            allocator.free(weapons_);
+        }
+        const equipped_ = try Equipment.init(allocator, try packed_.equipped());
+        errdefer {
+            equipped_.deinit(allocator);
+        }
+        const path_ = try flatbuffers.unpackVector(allocator, Vec3, packed_, "path");
+        errdefer {
+            allocator.free(path_);
+        }
         return .{
             .pos = try packed_.pos(),
             .mana = try packed_.mana(),
             .hp = try packed_.hp(),
-            .name = try allocator.dupeZ(u8, try packed_.name()),
-            .inventory = try flatbuffers.unpackVector(allocator, i16, packed_, "inventory"),
+            .name = name_,
+            .inventory = inventory_,
             .color = try packed_.color(),
-            .weapons = try flatbuffers.unpackVector(allocator, Weapon, packed_, "weapons"),
-            .equipped = try Equipment.init(allocator, try packed_.equipped()),
-            .path = try flatbuffers.unpackVector(allocator, Vec3, packed_, "path"),
+            .weapons = weapons_,
+            .equipped = equipped_,
+            .path = path_,
             .rotation = try packed_.rotation(),
         };
     }
@@ -197,10 +218,19 @@ pub const Weapon = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, packed_: PackedWeapon) flatbuffers.Error!Self {
+        const name_ = try allocator.dupeZ(u8, try packed_.name());
+        errdefer {
+            allocator.free(name_);
+        }
+        const owners_ = try flatbuffers.unpackVector(allocator, [:0]const u8, packed_, "owners");
+        errdefer {
+            for (owners_) |o| allocator.free(o);
+            allocator.free(owners_);
+        }
         return .{
-            .name = try allocator.dupeZ(u8, try packed_.name()),
+            .name = name_,
             .damage = try packed_.damage(),
-            .owners = try flatbuffers.unpackVector(allocator, [:0]const u8, packed_, "owners"),
+            .owners = owners_,
         };
     }
 
