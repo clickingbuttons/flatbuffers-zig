@@ -174,7 +174,7 @@ pub const CodeWriter = struct {
         return self.getPrefixedTypeName(if (is_packed) "packed " else "", name);
     }
 
-    pub fn allocPrint(self: *Self, comptime fmt: []const u8, args: anytype) ![]u8 {
+    pub fn allocPrint(self: *Self, comptime fmt: []const u8, args: anytype) ![]const u8 {
         return try std.fmt.allocPrint(self.allocator, fmt, args);
     }
 
@@ -209,12 +209,13 @@ pub const CodeWriter = struct {
 
                     const is_packed = (t == .utype or type_.is_packed) and type_.isPackable(self.schema);
                     const typename = try self.getTypeName(child.name(), is_packed);
-                    return self.allocPrint("{s}{s}{s}{s}{s}", .{
+                    return self.allocPrint("{s}{s}{s}{s}{s}{s}", .{
                         if (type_.is_optional and t != .@"union") "?" else "",
                         decl_name,
                         if (decl_name.len > 0) "." else "",
                         typename,
-                        if (t == .utype) ".Tag" else "",
+                        if (t == .utype) "." else "",
+                        if (t == .utype) self.ident_map.get("Tag").? else "",
                     });
                 } else if (t == .utype or t == .obj or t == .@"union") {
                     const err = try self.allocPrint(
@@ -264,6 +265,44 @@ pub const CodeWriter = struct {
         }
     }
 
+    fn getArgType(self: *Self, arg_type: []const u8) ![]const u8 {
+        var res = std.ArrayList(u8).init(self.allocator);
+        defer res.deinit();
+
+        const has_module = std.mem.indexOfScalar(u8, arg_type, '.') != null;
+        var first_ident = false;
+
+        const with_sentinel = try self.allocator.dupeZ(u8, arg_type);
+        defer self.allocator.free(with_sentinel);
+
+        var tokenizer = std.zig.Tokenizer.init(with_sentinel);
+        // See if there are two identifiers (the first is the module)
+        while (true) {
+            const token = tokenizer.next();
+            const source = arg_type[token.loc.start..token.loc.end];
+
+            switch (token.tag) {
+                .identifier => {
+                    if (!first_ident) {
+                        if (has_module) {
+                            const mod_name = try self.putDeclaration(source, source);
+                            try res.appendSlice(mod_name);
+                        } else {
+                            // Self, PackedType etc.
+                            try res.appendSlice(self.ident_map.get(source) orelse source);
+                        }
+                        first_ident = true;
+                    } else {
+                        try res.appendSlice(source);
+                    }
+                },
+                .eof => break,
+                else => try res.appendSlice(source),
+            }
+        }
+        return self.string_pool.getOrPut(res.items);
+    }
+
     fn writeFnSig(
         self: *Self,
         name: []const u8,
@@ -278,11 +317,16 @@ pub const CodeWriter = struct {
         , .{name});
         for (args, 0..) |*arg, i| {
             arg.name = try self.getIdentifier(arg.name);
-            arg.type = self.ident_map.get(arg.type) orelse arg.type;
+            arg.type = try self.getArgType(arg.type);
             try writer.print("{s}: {s}", .{ arg.name, arg.type });
             if (i != args.len - 1) try writer.writeByte(',');
         }
-        try writer.print(") {s}{s} {{", .{ if (return_error) "flatbuffers.Error!" else "", return_type });
+        if (return_error) {
+            const mod_name = try self.putDeclaration(self.opts.module_name, self.opts.module_name);
+            try writer.print(") {s}.Error!{s} {{", .{ mod_name, return_type });
+        } else {
+            try writer.print(") {s} {{", .{return_type});
+        }
     }
 
     fn writeObjectFieldScalarFns(
@@ -1086,7 +1130,7 @@ pub const CodeWriter = struct {
             if (is_packed) {
                 try writer.writeAll("enum");
             } else {
-                try writer.print("{s}.Tag", .{packed_name});
+                try writer.print("{s}.{s}", .{ packed_name, self.ident_map.get("Tag").? });
             }
             try writer.writeAll(") {");
         } else if (enum_.isBitFlags()) {

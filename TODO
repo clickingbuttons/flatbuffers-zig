@@ -22,7 +22,7 @@
 		- [x] union with objects that allocate
 		- [x] copy out strings to unpacked types
 		- [x] temps + errdefer in object init
-		- [ ] args with modules in typenames
+		- [x] args with modules in typenames
 	- [x] use in arrow
 		- [ ] nice way to codegen in build.zig
 	- [ ] docs
