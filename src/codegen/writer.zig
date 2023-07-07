@@ -682,6 +682,7 @@ pub const CodeWriter = struct {
 
         try self.writeFnSig("init", true, self_ident, args.items);
 
+        // Make some temporaries so if one of them errors we can free its allocations.
         for (object.fields) |field| {
             if (field.type.base_type == .utype or field.deprecated) continue;
 

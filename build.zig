@@ -39,11 +39,11 @@ fn buildLib(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mo
 }
 
 fn buildExe(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mode, module: *std.Build.Module) void {
-    const flatbuffers_dep = b.dependency(name, .{
+    const flatbuffers_cpp_dep = b.dependency("flatbuffers", .{
         .target = target,
         .optimize = optimize,
     });
-    const flatc = flatbuffers_dep.artifact("flatc");
+    const flatc = flatbuffers_cpp_dep.artifact("flatc");
 
     const clap_dep = b.dependency("clap", .{
         .target = target,
