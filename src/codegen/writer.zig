@@ -637,33 +637,29 @@ pub const CodeWriter = struct {
         try args.append(.{ .name = "packed_", .type = packed_name });
 
         try self.writeFnSig("init", true, self_ident, args.items);
-        try writer.writeAll("\nreturn .{");
 
         for (object.fields) |field| {
             if (field.type.base_type == .utype or field.deprecated) continue;
 
-            const field_name = try self.getFieldName(field.name);
+            const tmp_field_name = try self.getTmpName(try self.getFieldName(field.name));
             const field_type = try self.getType(field.type);
             const field_getter = try self.getFunctionName(field.name);
             const arg_index: usize = if (has_allocations) 1 else 0;
 
             switch (field.type.base_type) {
-                .vector => |t| {
+                .vector => {
                     const module_name = try self.putDeclaration(self.opts.module_name, self.opts.module_name);
-                    if (t == .vector) {
-                        try writer.print(
-                            \\
-                            \\    .{s} = try {s}.unpackVector({s}, {s}, {s}, "{s}"),
-                        , .{
-                            field_name,
-                            module_name,
-                            args.items[0].name,
-                            field_type[2..],
-                            args.items[1].name,
-                            field_getter,
-                        });
-                    }
-                    continue;
+                    try writer.print(
+                        \\
+                        \\    const {s} = try {s}.unpackVector({s}, {s}, {s}, "{s}");
+                    , .{
+                        tmp_field_name,
+                        module_name,
+                        args.items[0].name,
+                        field_type[2..],
+                        args.items[1].name,
+                        field_getter,
+                    });
                 },
                 .obj, .@"union" => |t| brk: {
                     if (try field.isStruct(self.schema) or field.type.isEmpty(self.schema)) break :brk;
@@ -679,48 +675,86 @@ pub const CodeWriter = struct {
                     if (field.type.is_optional and t != .@"union") {
                         try writer.print(
                             \\
-                            \\    .{0s} = if (try {1s}.{2s}()) |{3s}| try {4s}.init({5s}{3s}) else null,
+                            \\    const {0s} = if (try {1s}.{2s}()) |{3s}| try {4s}.init({5s}{3s}) else null;
                         , .{
-                            field_name,
+                            tmp_field_name,
                             args.items[arg_index].name,
                             field_getter,
-                            try self.getTmpName(field_name[0..1]),
+                            try self.getTmpName(tmp_field_name[0..1]),
                             field_type[1..],
                             maybe_allocator_param,
                         });
                     } else {
                         try writer.print(
                             \\
-                            \\    .{s} = try {s}.init({s} try {s}.{s}()),
+                            \\    const {s} = try {s}.init({s} try {s}.{s}());
                         , .{
-                            field_name,
+                            tmp_field_name,
                             field_type,
                             maybe_allocator_param,
                             args.items[1].name,
                             field_getter,
                         });
                     }
-                    continue;
                 },
                 .string => {
                     try writer.print(
                         \\
-                        \\    .{s} = try {s}.dupeZ(u8, try {s}.{s}()),
+                        \\    const {s} = try {s}.dupeZ(u8, try {s}.{s}());
                     , .{
-                        field_name,
+                        tmp_field_name,
                         args.items[0].name,
                         args.items[1].name,
                         field_getter,
                     });
-                    continue;
                 },
                 else => {},
             }
-            try writer.print(
-                \\
-                \\    .{s} = try {s}.{s}(),
-            , .{ field_name, args.items[arg_index].name, field_getter });
+            if (try field.isAllocated(self.schema)) {
+                try writer.writeAll(
+                    \\
+                    \\errdefer {
+                    \\
+                );
+                try self.writeFieldDeinit(
+                    field.type,
+                    tmp_field_name,
+                    "",
+                    args.items[0].name,
+                );
+                try writer.writeAll(
+                    \\
+                    \\}
+                );
+            }
         }
+
+        try writer.writeAll(
+            \\
+            \\return .{
+        );
+
+        for (object.fields) |field| {
+            if (field.type.base_type == .utype or field.deprecated) continue;
+
+            const field_name = try self.getFieldName(field.name);
+            const tmp_field_name = try self.getTmpName(field_name);
+            const field_getter = try self.getFunctionName(field.name);
+            const arg_index: usize = if (has_allocations) 1 else 0;
+
+            if (try field.isAllocated(self.schema)) {
+                try writer.print(
+                    \\
+                    \\    .{s} = {s},
+                , .{ field_name, tmp_field_name });
+            } else {
+                try writer.print(
+                    \\
+                    \\    .{s} = try {s}.{s}(),
+                , .{ field_name, args.items[arg_index].name, field_getter });
+            }
+        }
+
         try writer.writeAll(
             \\
             \\    };
@@ -746,17 +780,24 @@ pub const CodeWriter = struct {
         self: *Self,
         field_type: types.Type,
         field_name: []const u8,
-        self_name: []const u8,
+        self_name_in: []const u8,
         allocator_name: []const u8,
     ) !void {
         const writer = self.buffer.writer();
+
+        const self_name = if (self_name_in.len > 0)
+            try self.allocPrint("{s}.", .{self_name_in})
+        else
+            try self.allocPrint("{s}", .{self_name_in});
+        defer self.allocator.free(self_name);
+
         switch (field_type.base_type) {
             .vector, .string => {
                 if (field_type.child(self.schema)) |child| {
                     if (child.isAllocated(self.schema)) switch (child) {
                         .scalar => try writer.print(
                             \\
-                            \\for ({0s}.{1s}) |{2s}| {3s}.free({2s});
+                            \\for ({0s}{1s}) |{2s}| {3s}.free({2s});
                         , .{
                             self_name,
                             field_name,
@@ -765,7 +806,7 @@ pub const CodeWriter = struct {
                         }),
                         else => try writer.print(
                             \\
-                            \\for ({0s}.{1s}) |{2s}| {2s}.deinit({3s});
+                            \\for ({0s}{1s}) |{2s}| {2s}.deinit({3s});
                         , .{
                             self_name,
                             field_name,
@@ -776,7 +817,7 @@ pub const CodeWriter = struct {
                 }
                 try writer.print(
                     \\
-                    \\{s}.free({s}.{s});
+                    \\{s}.free({s}{s});
                 , .{
                     allocator_name,
                     self_name,
@@ -790,7 +831,7 @@ pub const CodeWriter = struct {
                 if (field_type.is_optional and t != .@"union") {
                     try writer.print(
                         \\
-                        \\    if ({0s}.{1s}) |{2s}| {2s}.deinit({3s});
+                        \\    if ({0s}{1s}) |{2s}| {2s}.deinit({3s});
                     , .{
                         self_name,
                         field_name,
@@ -800,7 +841,7 @@ pub const CodeWriter = struct {
                 } else {
                     try writer.print(
                         \\
-                        \\    {s}.{s}.deinit({s});
+                        \\    {s}{s}.deinit({s});
                     , .{
                         self_name,
                         field_name,

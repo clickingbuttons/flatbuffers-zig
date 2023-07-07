@@ -21,9 +21,10 @@
 		- [x] fix schema leaks (attributes)
 		- [x] union with objects that allocate
 		- [x] copy out strings to unpacked types
-		- [ ] temps + errdefer in object init
-		- [ ] args with modules in types
-	- [ ] use in arrow
+		- [x] temps + errdefer in object init
+		- [ ] args with modules in typenames
+	- [x] use in arrow
+		- [ ] nice way to codegen in build.zig
 	- [ ] docs
 options:
 - [x] casing for function names

@@ -81,6 +81,14 @@ pub const Field = struct {
             else => false,
         };
     }
+
+    pub fn isAllocated(self: Self, schema: types.Schema) flatbuffers.Error!bool {
+        return switch (self.type.base_type) {
+            .vector, .string => true,
+            .obj, .@"union" => !try self.isStruct(schema) and !self.type.isEmpty(schema),
+            else => false,
+        };
+    }
 };
 
 pub const PackedField = struct {
