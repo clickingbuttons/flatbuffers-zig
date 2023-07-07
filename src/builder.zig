@@ -381,6 +381,8 @@ fn exampleWeapon(builder: *Builder, name: []const u8, damage: i16) !Offset {
     return try builder.endTable();
 }
 
+/// Creates an example flatbuffer conforming to ./src/codegen/examples/monster/monster.fbs
+/// which includes a field of every type class.
 pub fn exampleMonster(allocator: Allocator) ![]u8 {
     var builder = Builder.init(allocator);
 

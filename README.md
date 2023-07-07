@@ -1,8 +1,9 @@
 # flatbuffers-zig
 
-Library to read/write flatbuffers and CLI to generate Zig code from .fbs files.
+![tests](https://github.com/clickingbuttons/flatbuffers-zig/actions/workflows/test.yml/badge.svg)
+[![docs](https://github.com/clickingbuttons/flatbuffers-zig/actions/workflows/publish_docs.yml/badge.svg)](https://clickingbuttons.github.io/flatbuffers-zig)
 
-Last built with zig@0.11.0-dev.3937+78eb3c561
+Library to read/write [flatbuffers](https://flatbuffers.dev/flatbuffers_internals.html) and CLI to generate Zig code from .fbs files.
 
 ## Installation
 
@@ -38,7 +39,7 @@ Run `zig build` and then copy the expected hash into `build.zig.zon`.
 
 ### Code generation
 
-If you have some .fbs files you'd like to read/write, run `flatc-zig` to generate code to do so.
+If you have some `.fbs` files you'd like to read/write, run `flatc-zig` to generate code to do so.
 
 ```sh
 $ ./zig-out/flatc-zig --help
