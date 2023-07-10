@@ -644,21 +644,16 @@ pub const CodeWriter = struct {
         }
         try writer.writeByte('\n');
 
-        const has_fields = object.fields.len > 0;
-
-        if (has_fields) {
-            try writer.print(
-                \\
-                \\    try {s}.startTable();
-            , .{args[1].name});
-        }
+        if (object.fields.len == 0) try writer.print("_ = {s};", .{args[0].name});
+        try writer.print(
+            \\
+            \\    try {s}.startTable();
+        , .{args[1].name});
         try writer.writeAll(field_pack_code.items);
-        if (has_fields) {
-            try writer.print(
-                \\
-                \\    return {s}.endTable();
-            , .{args[1].name});
-        }
+        try writer.print(
+            \\
+            \\    return {s}.endTable();
+        , .{args[1].name});
 
         try writer.writeAll("\n}");
     }
@@ -669,6 +664,7 @@ pub const CodeWriter = struct {
         has_allocations: bool,
         packed_name: []const u8,
     ) !void {
+        if (object.fields.len == 0) return;
         const writer = self.buffer.writer();
         const self_ident = self.ident_map.get("Self").?;
 
@@ -952,7 +948,7 @@ pub const CodeWriter = struct {
                 \\pub const {s} = {s}struct {{
             , .{ type_name, if (object.is_struct) "extern " else "" });
             try self.writeObjectFields(object, is_packed);
-            if (!object.is_struct and object.fields.len > 0) {
+            if (!object.is_struct) {
                 try writer.print(
                     \\
                     \\
