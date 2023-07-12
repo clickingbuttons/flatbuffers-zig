@@ -210,7 +210,7 @@ pub const CodeWriter = struct {
                     const is_packed = (t == .utype or type_.is_packed) and type_.isPackable(self.schema);
                     const typename = try self.getTypeName(child.name(), is_packed);
                     return self.allocPrint("{s}{s}{s}{s}{s}{s}", .{
-                        if (type_.is_optional and t != .@"union") "?" else "",
+                        if (type_.is_optional) "?" else "",
                         decl_name,
                         if (decl_name.len > 0) "." else "",
                         typename,
@@ -443,7 +443,6 @@ pub const CodeWriter = struct {
             if (field.deprecated) continue;
             field.type.is_packed = is_packed;
             const name = try self.getFieldName(field.name);
-            const is_indirect = field.type.isIndirect(self.schema);
             const typename = try self.getType(field.type);
             try self.writeComment(field);
             if (is_packed) {
@@ -454,7 +453,7 @@ pub const CodeWriter = struct {
                 switch (field.type.base_type) {
                     .utype, .bool, .byte, .ubyte, .short, .ushort, .int, .uint, .long, .ulong, .float, .double, .obj, .array, .string => try self.writeObjectFieldScalarFns(field.*, getter_name, typename),
                     .vector => {
-                        if (is_indirect) {
+                        if (field.type.isIndirect(self.schema)) {
                             try self.writeObjectFieldVectorLenFn(field.*);
                             try self.writeObjectFieldVectorFn(field.*, getter_name, typename);
                         } else {
@@ -551,7 +550,7 @@ pub const CodeWriter = struct {
         const ty_name = try self.getType(field.type);
         const is_indirect = field.type.isIndirect(self.schema);
         const is_offset = switch (field.type.base_type) {
-            .obj => is_indirect,
+            .obj => !field.isStruct(self.schema),
             .string, .vector, .@"union" => true,
             else => false,
         };
@@ -590,9 +589,19 @@ pub const CodeWriter = struct {
                     try offset_list.append(.{ .name = field_name, .offset = offset });
                 },
                 .obj, .@"union" => {
-                    const offset = try self.string_pool.getOrPutFmt(
-                        \\try {s}.{s}.pack({s})
-                    , .{ self_name, field_name, builder_name });
+                    const offset = if (field.type.is_optional)
+                        try self.string_pool.getOrPutFmt(
+                            \\ if ({0s}.{1s}) |{2s}| try {2s}.pack({3s}) else 0
+                        , .{
+                            self_name,
+                            field_name,
+                            try self.getTmpName(field.name[0..1]),
+                            builder_name,
+                        })
+                    else
+                        try self.string_pool.getOrPutFmt(
+                            \\try {s}.{s}.pack({s})
+                        , .{ self_name, field_name, builder_name });
                     try offset_list.append(.{ .name = field_name, .offset = offset });
                 },
             }
@@ -702,8 +711,8 @@ pub const CodeWriter = struct {
                         field_getter,
                     });
                 },
-                .obj, .@"union" => |t| brk: {
-                    if (try field.isStruct(self.schema) or field.type.isEmpty(self.schema)) break :brk;
+                .obj, .@"union" => brk: {
+                    if (field.isStruct(self.schema) or field.type.isEmpty(self.schema)) break :brk;
 
                     const child = field.type.child(self.schema).?;
                     const maybe_allocator_param = if (child.isAllocated(self.schema))
@@ -712,8 +721,7 @@ pub const CodeWriter = struct {
                         try self.allocator.alloc(u8, 0);
                     defer self.allocator.free(maybe_allocator_param);
 
-                    // Unions have a "none" to represent null
-                    if (field.type.is_optional and t != .@"union") {
+                    if (field.type.is_optional) {
                         try writer.print(
                             \\
                             \\    const {0s} = if (try {1s}.{2s}()) |{3s}| try {4s}.init({5s}{3s}) else null;
@@ -751,7 +759,7 @@ pub const CodeWriter = struct {
                 },
                 else => {},
             }
-            if (try field.isAllocated(self.schema)) {
+            if (field.isAllocated(self.schema)) {
                 try writer.writeAll(
                     \\
                     \\errdefer {
@@ -783,7 +791,7 @@ pub const CodeWriter = struct {
             const field_getter = try self.getFunctionName(field.name);
             const arg_index: usize = if (has_allocations) 1 else 0;
 
-            if (try field.isAllocated(self.schema)) {
+            if (field.isAllocated(self.schema)) {
                 try writer.print(
                     \\
                     \\    .{s} = {s},
@@ -865,11 +873,10 @@ pub const CodeWriter = struct {
                     field_name,
                 });
             },
-            .obj, .@"union" => |t| {
+            .obj, .@"union" => {
                 const child = field_type.child(self.schema).?;
                 if (!child.isAllocated(self.schema)) return;
-                // Unions have a "none" to represent null
-                if (field_type.is_optional and t != .@"union") {
+                if (field_type.is_optional) {
                     try writer.print(
                         \\
                         \\    if ({0s}{1s}) |{2s}| {2s}.deinit({3s});
@@ -1170,7 +1177,13 @@ pub const CodeWriter = struct {
 
         if (@hasField(@TypeOf(obj_or_enum), "fields")) {
             std.sort.pdq(types.Field, obj_or_enum.fields, {}, Field.lessThan);
-            for (obj_or_enum.fields) |*field| field.type.is_optional = field.optional and !field.required;
+
+            for (obj_or_enum.fields) |*field| {
+                field.type.is_optional = field.optional and
+                    !field.required and
+                    // Unions have a "none" to represent null
+                    field.type.base_type != .@"union";
+            }
 
             const unpacked_name = try self.writeObject(obj_or_enum, false);
             try self.written_enum_or_object_idents.append(unpacked_name);
