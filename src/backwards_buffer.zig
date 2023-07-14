@@ -64,6 +64,22 @@ pub const BackwardsBuffer = struct {
         try self.ensureCapacity(self.data.len + n_bytes);
         for (0..n_bytes) |_| try self.prepend(val);
     }
+
+    /// Invalidates all element pointers.
+    pub fn clearAndFree(self: *Self) void {
+        self.allocator.free(self.allocatedSlice());
+        self.data.len = 0;
+        self.capacity = 0;
+    }
+
+    /// The caller owns the returned memory. Empties this BackwardsBuffer. Its capacity is cleared, making deinit() safe but unnecessary to call.
+    pub fn toOwnedSlice(self: *Self) ![]u8 {
+        const new_memory = try self.allocator.alloc(u8, self.data.len);
+        @memcpy(new_memory, self.data);
+        @memset(self.data, undefined);
+        self.clearAndFree();
+        return new_memory;
+    }
 };
 
 test "backwards buffer" {

@@ -11,27 +11,39 @@ const log = types.log;
 /// Flatbuffer builder. Written bottom to top. Includes header, tables, vtables, and strings.
 pub const Builder = struct {
     const VTable = std.ArrayList(VOffset);
+    const VTables = std.StringHashMap(Offset);
 
     buffer: BackwardsBuffer,
     vtable: VTable,
+    vtables: VTables,
     table_start: Offset = 0,
     // TODO: output this
     min_alignment: usize = 1,
-    nested: bool = false,
 
     const Self = @This();
 
     pub fn init(allocator: Allocator) Self {
-        return .{ .buffer = BackwardsBuffer.init(allocator), .vtable = VTable.init(allocator) };
+        return .{
+            .buffer = BackwardsBuffer.init(allocator),
+            .vtable = VTable.init(allocator),
+            .vtables = VTables.init(allocator),
+        };
+    }
+
+    fn deinitAdvanced(self: *Self, comptime deinit_buffer: bool) void {
+        self.vtable.deinit();
+        var iter = self.vtables.keyIterator();
+        while (iter.next()) |k| self.buffer.allocator.free(k.*);
+        self.vtables.deinit();
+        if (deinit_buffer) self.buffer.deinit();
     }
 
     pub fn deinit(self: *Self) void {
-        self.buffer.deinit();
-        self.vtable.deinit();
+        self.deinitAdvanced(true);
     }
 
     pub fn offset(self: Self) Offset {
-        return @as(Offset, @intCast(self.buffer.data.len));
+        return @intCast(self.buffer.data.len);
     }
 
     fn prepAdvanced(self: *Self, size: usize, n_bytes_after: usize) !void {
@@ -49,8 +61,9 @@ pub const Builder = struct {
     }
 
     pub fn prepend(self: *Self, value: anytype) !void {
-        if (@TypeOf(value) == void) return;
-        try self.prep(@TypeOf(value), 0);
+        const T = @TypeOf(value);
+        if (T == void) return;
+        try self.prep(T, 0);
         try self.buffer.prepend(value);
     }
 
@@ -137,10 +150,18 @@ pub const Builder = struct {
     }
 
     fn writeVTable(self: *Self) !Offset {
-        const n_items = self.vtable.items.len;
+        const n_items = brk: {
+            // Starting from end look for non-0 VOffset
+            const len = self.vtable.items.len;
+            for (0..len) |i| {
+                const index = len - i - 1;
+                if (self.vtable.items[index] != 0) break :brk index + 1;
+            }
+            break :brk 0;
+        };
+
         const vtable_len: VOffset = @intCast((n_items + 2) * @sizeOf(VOffset));
 
-        // You usually want to reference the start of the table, not the start of the vtable.
         try self.prepend(@as(Offset, vtable_len)); // offset to start of vtable
         const vtable_start = self.offset();
         for (0..n_items) |i| {
@@ -154,7 +175,19 @@ pub const Builder = struct {
         }
         const table_len: VOffset = @intCast(vtable_start - self.table_start);
         try self.prepend(table_len);
-        try self.prepend(@as(VOffset, @intCast(vtable_len)));
+        try self.prepend(vtable_len);
+
+        const vtable_bytes = self.buffer.data[0..vtable_len];
+        if (self.vtables.get(vtable_bytes)) |o| {
+            self.buffer.data = self.buffer.data[vtable_len + @sizeOf(Offset) ..];
+            const neg_offset: i32 = @as(i32, @bitCast(o)) + vtable_len - // original offset
+                @sizeOf(i32) - @as(i32, @bitCast(self.offset()));
+            try self.prepend(neg_offset);
+
+            return vtable_start;
+        }
+        const owned_bytes = try self.buffer.allocator.dupe(u8, vtable_bytes);
+        try self.vtables.put(owned_bytes, vtable_start);
 
         return vtable_start;
     }
@@ -167,8 +200,8 @@ pub const Builder = struct {
         try self.prepAdvanced(self.min_alignment, @sizeOf(Offset));
         try self.prependOffset(root);
 
-        self.vtable.deinit();
-        return self.buffer.data;
+        self.deinitAdvanced(false);
+        return try self.buffer.toOwnedSlice();
     }
 };
 
@@ -413,50 +446,50 @@ pub fn exampleMonster(allocator: Allocator) ![]u8 {
 }
 
 test "build monster" {
+    testing.log_level = .debug;
     // annotated to make debugging Table easier
     const bytes = try exampleMonster(testing.allocator);
     defer testing.allocator.free(bytes);
     // Flatc has a handly annotation tool for making this test. Just uncomment the lines below:
-    // var file = try std.fs.cwd().createFile("monster_data.bfbs", .{});
-    // defer file.close();
-    // try file.writer().writeAll(bytes);
+    var file = try std.fs.cwd().createFile("monster_data.bfbs", .{});
+    defer file.close();
+    try file.writer().writeAll(bytes);
 
     // And run these commands:
     // flatc --annotate ./src/codegen/examples/monster/monster.fbs ./monster_data.bfbs
     // less monster_data.afb
     try testing.expectEqualSlices(u8, &[_]u8{
-        // header
+        // header 0x00
         0x2C, 0, 0, 0, // offset to root table `Monster`
         0, 0, 0, 0, // padding
         0, 0, 0, 0, // padding
         0, 0, 0, 0, // padding (TODO: too much padding?)
 
-        // vtable `Monster`
-        0x1c, 0, // vtable len
-        0x50, 0, // table len
-        0x3c, 0, // offset to field `pos` (id: 0)
-        0x3a, 0, // offset to field `mana` (id: 1)
-        0x38, 0, // offset to field `hp` (id: 2)
-        0x34, 0, // offset to field `name` (id: 3)
+        // vtable (Monster) 0x10
+        0x1C, 0, // vtable len
+        0x44, 0, // table len
+        0x38, 0, // offset to field `pos` (id: 0)
+        0x36, 0, // offset to field `mana` (id: 1)
+        0x34, 0, // offset to field `hp` (id: 2)
+        0x30, 0, // offset to field `name` (id: 3)
         0x00, 0, // offset to field `friendly` (id: 4) <defaults to 0> (Bool)
-        0x30, 0, // offset to field `inventory` (id: 5)
-        0x2f, 0, // offset to field `color` (id: 6)
-        0x28, 0, // offset to field `weapons` (id: 7)
-        0x27, 0, // offset to field `equipped_type` (id: 8)
-        0x20, 0, // offset to field `equipped` (id: 9)
-        0x1c, 0, // offset to field `path` (id: 10)
+        0x2C, 0, // offset to field `inventory` (id: 5)
+        0x2B, 0, // offset to field `color` (id: 6)
+        0x24, 0, // offset to field `weapons` (id: 7)
+        0x23, 0, // offset to field `equipped_type` (id: 8)
+        0x1C, 0, // offset to field `equipped` (id: 9)
+        0x18, 0, // offset to field `path` (id: 10)
         0x04, 0, // offset to field `rotation` (id: 11)
 
-        // root table `Monster`
+        // root table (Monster) 0x2c
         0x1C, 0, 0, 0, // offset to vtable
         0, 0, 0x80, 0x3F, // rotation[0] = @as(f32, 1)
         0, 0, 0, 0x40, // rotation[1] = @as(f32, 2)
         0, 0, 0x40, 0x40, // rotation[2] = @as(f32, 3)
         0, 0, 0x80, 0x40, // rotation[3] = @as(f32, 4)
         0, 0, 0, 0, // padding
-        0, 0, 0, 0, // padding
-        0x34, 0, 0, 0, // offset to field `path` (vector)
-        0xB8, 0, 0, 0, // offset to field `equipped` (union of type `Weapon`)
+        0x2C, 0, 0, 0, // offset to field `path` (vector)
+        0xAC, 0, 0, 0, // offset to field `equipped` (union of type `Weapon`)
         0, 0, 0, @intFromEnum(Equipment.weapon), // equipped_type
         0x44, 0, 0, 0, // offset to field `weapons` (vector)
         0, 0, 0, @intFromEnum(Color.green), // table field `color` (Byte)
@@ -467,10 +500,8 @@ test "build monster" {
         0, 0, 0x80, 0x3F, // struct field `pos.x` of 'Vec3' (Float)
         0, 0, 0, 0x40, // struct field `pos.y` of 'Vec3' (Float)
         0, 0, 0x40, 0x40, // struct field `pos.z` of 'Vec3' (Float)
-        0, 0, 0, 0, // padding
-        0, 0, 0, 0, // padding
 
-        // vector `Monster.path`
+        // vector (Monster.path) 0x70
         0x02, 0, 0, 0, // length of vector (# items)
         0, 0, 0x80, 0x3F, // struct field `[0].x` of 'Vec3' (Float)
         0, 0, 0, 0x40, // struct field `[0].y` of 'Vec3' (Float)
@@ -478,11 +509,12 @@ test "build monster" {
         0, 0, 0x80, 0x40, // struct field `[1].x` of 'Vec3' (Float)
         0, 0, 0xA0, 0x40, // struct field `[1].y` of 'Vec3' (Float)
         0, 0, 0xC0, 0x40, // struct field `[1].z` of 'Vec3' (Float)
-
+        0, 0, 0, 0, // padding
+        0, 0, 0, 0, // padding
         // vector (Monster.weapons):
         0x02, 0, 0, 0, // length of vector (# items)
-        0x68, 0, 0, 0, // offset to table[0]
-        0x20, 0, 0, 0, // offset to table[1]
+        0x5C, 0, 0, 0, // offset to table[0]
+        0x14, 0, 0, 0, // offset to table[1]
 
         // vector (Monster.inventory):
         0x02, 0, 0, 0, // length of vector (# items)
@@ -491,19 +523,10 @@ test "build monster" {
 
         // string (Monster.name):
         0x03, 0, 0, 0, // length of string
-        0x6F, 0x72, 0x63, // string literal
-        0, // string terminator
-        0, 0, // padding
-
-        // vtable (Weapon):
-        0x0A, 0, // size of this vtable
-        0x10, 0, // size of referring table
-        0x0C, 0, // offset to field `name` (id: 0)
-        0x0A, 0, // offset to field `damage` (id: 1)
-        0x04, 0, // offset to field `owners` (id: 2)
+        'o', 'r', 'c', 0, // string
 
         // table (Weapon):
-        0x0A, 0, 0, 0, // offset to vtable
+        0xC6, 0xFF, 0xFF, 0xFF, // offset to vtable
         0x14, 0, 0, 0, // offset to field `owners` (vector)
         0, 0, // padding
         0x17, 0, // table field `damage` (Short)
@@ -511,8 +534,7 @@ test "build monster" {
 
         // string (Weapon.name):
         0x03, 0, 0, 0, // length of string
-        0x61, 0x78, 0x65, // string literal
-        0, // string terminator
+        'a', 'x', 'e', 0, // string
 
         // vector (Weapon.owners):
         0x02, 0, 0, 0, // length of vector (# items)
@@ -521,14 +543,13 @@ test "build monster" {
 
         // string (Weapon.owners):
         0x05, 0, 0, 0, // length of string
-        0x46, 0x69, 0x6F, 0x6E, 0x61, // string literal
-        0, // string terminator
-        0, 0, // padding
+        'F', 'i', 'o', 'n', // string
+        'a', 0, 0, 0, // string
 
         // string (Weapon.owners):
         0x05, 0, 0, 0, // length of string
-        0x53, 0x68, 0x72, 0x65, 0x6B, // string literal
-        0, // string terminator
+        'S', 'h', 'r', 'e', // string
+        'k', 0, // string
 
         // vtable (Weapon):
         0x0A, 0, // size of this vtable
@@ -546,8 +567,7 @@ test "build monster" {
 
         // string (Weapon.name):
         0x03, 0, 0, 0, // length of string
-        0x73, 0x61, 0x77, // string literal
-        0, // string terminator
+        's', 'a', 'w', 0, // string
 
         // vector (Weapon.owners):
         0x02, 0, 0, 0, // length of vector (# items)
@@ -555,15 +575,74 @@ test "build monster" {
         0x04, 0, 0, 0, // offset to string[1]
 
         // string (Weapon.owners):
-        0x05, 0, 0, 0, // length of string
-        0x46, 0x69, 0x6F, 0x6E, 0x61, // string literal
-        0, // string terminator
-        0, 0, // padding
+        0x05, 0,   0,   0, // length of string
+        'F',  'i', 'o', 'n',
+        'a', 0, 0, 0, // padding
 
         // string (Weapon.owners):
         0x05, 0, 0, 0, // length of string
-        0x53, 0x68, 0x72, 0x65, 0x6B, // string literal
-        0, // string terminator
+        'S', 'h', 'r', 'e', // string
+        'k', 0, 0, 0, // string
+    }, bytes);
+}
+
+test "vtable truncates trailing null fields" {
+    const allocator = testing.allocator;
+    var builder = Builder.init(allocator);
+
+    try builder.startTable();
+    try builder.appendTableField(i32, 1);
+    try builder.appendTableField(?i64, null);
+    try builder.appendTableField(?i32, null);
+    const root = try builder.endTable();
+
+    const bytes = try builder.finish(root);
+    defer testing.allocator.free(bytes);
+
+    try testing.expectEqualSlices(u8, &[_]u8{
+        // header
+        0x0C, 0, 0, 0, // offset to root table
         0, 0, // padding
+        0x06, 0, // vtable len
+        0x08, 0, // table len
+        0x04, 0, // offset to field 0
+        // <- field 1 optimized away
+        // <- field 2 optimized away
+        // table start
+        0x06, 0, 0, 0, // negative offset to vtable
+        0x01, 0, 0, 0, // field 0 @as(i32, 1)
+    }, bytes);
+}
+
+test "vtable caching" {
+    const allocator = testing.allocator;
+    var builder = Builder.init(allocator);
+
+    try builder.startTable();
+    try builder.appendTableField(i32, 1);
+    try builder.appendTableField(u32, 2);
+    _ = try builder.endTable();
+
+    try builder.startTable();
+    try builder.appendTableField(i32, 3);
+    try builder.appendTableField(u32, 4);
+    const root = try builder.endTable();
+
+    const bytes = try builder.finish(root);
+    defer allocator.free(bytes);
+
+    try testing.expectEqualSlices(u8, &[_]u8{
+        // header
+        0x04, 0, 0, 0, // offset to root table
+        0xF4, 0xFF, 0xFF, 0xFF, // negative offset to vtable (-12)
+        0x04, 0, 0, 0, // field 1 @as(u32, 4)
+        0x03, 0, 0, 0, // field 0 @as(i32, 3)
+        0x08, 0, // vtable len
+        0x0C, 0, // table len
+        0x08, 0, // offset to field 0
+        0x04, 0, // offset to field 1
+        0x08, 0, 0, 0, // negative offset to vtable
+        0x02, 0, 0, 0, // field 1 @as(u32, 2)
+        0x01, 0, 0, 0, // field 0 @as(i32, 1)
     }, bytes);
 }

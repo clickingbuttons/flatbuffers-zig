@@ -54,7 +54,7 @@ pub const Table = struct {
 
     fn signedAdd(a: Offset, b: i32) Offset {
         const signed = @as(i32, @bitCast(a)) + b;
-        return @as(Offset, @bitCast(signed));
+        return @bitCast(signed);
     }
 
     fn readAt(self: Self, comptime T: type, offset_: Offset) Error!T {
@@ -105,7 +105,11 @@ pub const Table = struct {
         const vtable_offset = try self.readAt(i32, self.offset);
         const vtable_loc = signedAdd(self.offset, -vtable_offset);
         const vtable_len = try readVOffset(try self.checkedSlice(vtable_loc, @sizeOf(VOffset)));
-        if (vtable_len > self.flatbuffer.len) return Error.PrematureVTableEnd;
+        if (vtable_len > self.flatbuffer.len) {
+            log.err("offset {x} vtable offset {x}", .{ self.offset, -vtable_offset });
+            log.err("vtable at {x} has len {d} > flatbuffer len {d}", .{ vtable_loc, vtable_len, self.flatbuffer.len });
+            return Error.PrematureVTableEnd;
+        }
         const bytes = try self.checkedSlice(vtable_loc, vtable_len);
         if (@intFromPtr(&self.flatbuffer[vtable_loc]) % @alignOf(VOffset) != 0) {
             return Error.InvalidAlignment;
@@ -122,7 +126,7 @@ pub const Table = struct {
         const vtable_ = try self.vtable();
         const index = id + 2;
 
-        // vtables that end with all default fields are cut short by `flatc`.
+        // vtables that end with all default fields are cut short as an optimization.
         if (index >= vtable_.len) return null;
 
         return vtable_[index];
