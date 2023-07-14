@@ -5,6 +5,6 @@ zig-out
 *.afb
 tmp
 docs
-# Needed until -fno-emit-bin is fixed
+# Needed until zig -fno-emit-bin is fixed
 *.a
 *.o

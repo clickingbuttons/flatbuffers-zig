@@ -17,7 +17,6 @@ pub const Builder = struct {
     vtable: VTable,
     vtables: VTables,
     table_start: Offset = 0,
-    // TODO: output this
     min_alignment: usize = 1,
 
     const Self = @This();
@@ -197,7 +196,7 @@ pub const Builder = struct {
     }
 
     pub fn finish(self: *Self, root: Offset) ![]u8 {
-        try self.prepAdvanced(self.min_alignment, @sizeOf(Offset));
+        try self.prepAdvanced(@sizeOf(Offset), self.min_alignment);
         try self.prependOffset(root);
 
         self.deinitAdvanced(false);
@@ -451,19 +450,16 @@ test "build monster" {
     const bytes = try exampleMonster(testing.allocator);
     defer testing.allocator.free(bytes);
     // Flatc has a handly annotation tool for making this test. Just uncomment the lines below:
-    var file = try std.fs.cwd().createFile("monster_data.bfbs", .{});
-    defer file.close();
-    try file.writer().writeAll(bytes);
+    // var file = try std.fs.cwd().createFile("monster_data.bfbs", .{});
+    // defer file.close();
+    // try file.writer().writeAll(bytes);
 
     // And run these commands:
     // flatc --annotate ./src/codegen/examples/monster/monster.fbs ./monster_data.bfbs
     // less monster_data.afb
     try testing.expectEqualSlices(u8, &[_]u8{
         // header 0x00
-        0x2C, 0, 0, 0, // offset to root table `Monster`
-        0, 0, 0, 0, // padding
-        0, 0, 0, 0, // padding
-        0, 0, 0, 0, // padding (TODO: too much padding?)
+        0x20, 0, 0, 0, // offset to root table `Monster`
 
         // vtable (Monster) 0x10
         0x1C, 0, // vtable len
