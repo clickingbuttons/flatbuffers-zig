@@ -329,6 +329,13 @@ pub const CodeWriter = struct {
         }
     }
 
+    // Struct owns returned string.
+    fn getScalarDefault(self: *Self, field: Field) ![]const u8 {
+        const default = try self.getDefault(field);
+        if (!field.required and default.len > 0 and !std.mem.eql(u8, default, "null")) return default;
+        return "";
+    }
+
     fn writeObjectFieldScalarFns(
         self: *Self,
         field: types.Field,
@@ -340,8 +347,8 @@ pub const CodeWriter = struct {
             .{ .name = "self", .type = "Self" },
         };
         try self.writeFnSig(getter_name, true, typename, &args);
-        const default = try self.getDefault(field);
-        if (!field.required and default.len > 0 and !std.mem.eql(u8, default, "null")) {
+        const default = try self.getScalarDefault(field);
+        if (default.len > 0) {
             try writer.print(
                 \\
                 \\    return {s}.table.readFieldWithDefault({s}, {d}, {s});
@@ -606,10 +613,18 @@ pub const CodeWriter = struct {
                 },
             }
         } else {
-            try writer.print(
-                \\
-                \\    try {s}.appendTableField({s}, {s}.{s});
-            , .{ builder_name, ty_name, self_name, field_name });
+            const default = try self.getScalarDefault(field);
+            if (default.len > 0) {
+                try writer.print(
+                    \\
+                    \\    try {s}.appendTableFieldWithDefault({s}, {s}.{s}, {s});
+                , .{ builder_name, ty_name, self_name, field_name, default });
+            } else {
+                try writer.print(
+                    \\
+                    \\    try {s}.appendTableField({s}, {s}.{s});
+                , .{ builder_name, ty_name, self_name, field_name });
+            }
         }
     }
 

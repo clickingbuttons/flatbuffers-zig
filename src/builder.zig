@@ -141,6 +141,14 @@ pub const Builder = struct {
         }
     }
 
+    pub fn appendTableFieldWithDefault(self: *Self, comptime T: type, value: T, default: T) !void {
+        if (value == default) {
+            try self.vtable.append(@as(VOffset, 0));
+        } else {
+            try self.appendTableField(T, value);
+        }
+    }
+
     pub fn appendTableFieldOffset(self: *Self, offset_: Offset) !void {
         if (offset_ == 0) { // Default or null.
             try self.vtable.append(@as(VOffset, 0));
@@ -432,14 +440,14 @@ pub fn exampleMonster(allocator: Allocator) ![]u8 {
 
     try builder.startTable();
     try builder.appendTableField(Vec3, .{ .x = 1, .y = 2, .z = 3 }); // field 0 (pos)
-    try builder.appendTableField(i16, 100); // field 1 (mana)
-    try builder.appendTableField(i16, 200); // field 2 (hp)
+    try builder.appendTableFieldWithDefault(i16, 100, 150); // field 1 (mana)
+    try builder.appendTableFieldWithDefault(i16, 200, 100); // field 2 (hp)
     try builder.appendTableFieldOffset(monster_name); // field 3 (name)
     try builder.appendTableFieldOffset(0); // field 4 (friendly, deprecated)
     try builder.appendTableFieldOffset(inventory); // field 5 (inventory)
-    try builder.appendTableField(Color, .green); // field 6 (color)
+    try builder.appendTableFieldWithDefault(Color, .green, .green); // field 6 (color)
     try builder.appendTableFieldOffset(weapons); // field 7 (weapons)
-    try builder.appendTableField(Equipment, Equipment.weapon); // field 8 (equipment type)
+    try builder.appendTableFieldWithDefault(Equipment, Equipment.weapon, .none); // field 8 (equipment type)
     try builder.appendTableFieldOffset(weapon0); // field 9 (equipment value)
     try builder.appendTableFieldOffset(path); // field 10 (path)
     try builder.appendTableField(Vec4, .{ .v = .{ 1, 2, 3, 4 } }); // field 11 (rotation)
@@ -474,11 +482,11 @@ test "build monster" {
         0x30, 0, // offset to field `name` (id: 3)
         0x00, 0, // offset to field `friendly` (id: 4) <defaults to 0> (Bool)
         0x2C, 0, // offset to field `inventory` (id: 5)
-        0x2B, 0, // offset to field `color` (id: 6)
-        0x24, 0, // offset to field `weapons` (id: 7)
-        0x23, 0, // offset to field `equipped_type` (id: 8)
-        0x1C, 0, // offset to field `equipped` (id: 9)
-        0x18, 0, // offset to field `path` (id: 10)
+        0, 0, // offset to field `color` (id: 6) <defaults to .green> (Enum)
+        0x28, 0, // offset to field `weapons` (id: 7)
+        0x27, 0, // offset to field `equipped_type` (id: 8)
+        0x20, 0, // offset to field `equipped` (id: 9)
+        0x1C, 0, // offset to field `path` (id: 10)
         0x04, 0, // offset to field `rotation` (id: 11)
 
         // root table (Monster) 0x2c
@@ -488,11 +496,11 @@ test "build monster" {
         0, 0, 0x40, 0x40, // rotation[2] = @as(f32, 3)
         0, 0, 0x80, 0x40, // rotation[3] = @as(f32, 4)
         0, 0, 0, 0, // padding
-        0x2C, 0, 0, 0, // offset to field `path` (vector)
-        0xAC, 0, 0, 0, // offset to field `equipped` (union of type `Weapon`)
+        0, 0, 0, 0, // padding
+        0x28, 0, 0, 0, // offset to field `path` (vector)
+        0xA8, 0, 0, 0, // offset to field `equipped` (union of type `Weapon`)
         0, 0, 0, @intFromEnum(Equipment.weapon), // equipped_type
-        0x44, 0, 0, 0, // offset to field `weapons` (vector)
-        0, 0, 0, @intFromEnum(Color.green), // table field `color` (Byte)
+        0x40, 0, 0, 0, // offset to field `weapons` (vector)
         0x48, 0, 0, 0, // offset to field `inventory` (vector)
         0x4C, 0, 0, 0, // offset to field `name` (string)
         0xC8, 0, // table field `hp` (Short)

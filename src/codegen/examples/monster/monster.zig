@@ -53,7 +53,7 @@ pub const PackedEquipment = union(enum) {
 
 pub const Monster = struct {
     pos: ?Vec3 = null,
-    mana: i16 = 150,
+    mana: i16 = 0,
     hp: i16 = 100,
     name: [:0]const u8,
     inventory: []i16,
@@ -121,14 +121,14 @@ pub const Monster = struct {
 
         try builder.startTable();
         try builder.appendTableField(?Vec3, self.pos);
-        try builder.appendTableField(i16, self.mana);
-        try builder.appendTableField(i16, self.hp);
+        try builder.appendTableFieldWithDefault(i16, self.mana, 0);
+        try builder.appendTableFieldWithDefault(i16, self.hp, 100);
         try builder.appendTableFieldOffset(field_offsets.name);
         try builder.appendTableFieldOffset(0);
         try builder.appendTableFieldOffset(field_offsets.inventory);
-        try builder.appendTableField(Color, self.color);
+        try builder.appendTableFieldWithDefault(Color, self.color, .green);
         try builder.appendTableFieldOffset(field_offsets.weapons);
-        try builder.appendTableField(PackedEquipment.Tag, self.equipped);
+        try builder.appendTableFieldWithDefault(PackedEquipment.Tag, self.equipped, .none);
         try builder.appendTableFieldOffset(field_offsets.equipped);
         try builder.appendTableFieldOffset(field_offsets.path);
         try builder.appendTableField(?Vec4, self.rotation);
@@ -150,7 +150,7 @@ pub const PackedMonster = struct {
     }
 
     pub fn mana(self: Self) flatbuffers.Error!i16 {
-        return self.table.readFieldWithDefault(i16, 1, 150);
+        return self.table.readFieldWithDefault(i16, 1, 0);
     }
 
     pub fn hp(self: Self) flatbuffers.Error!i16 {
@@ -248,7 +248,7 @@ pub const Weapon = struct {
 
         try builder.startTable();
         try builder.appendTableFieldOffset(field_offsets.name);
-        try builder.appendTableField(i16, self.damage);
+        try builder.appendTableFieldWithDefault(i16, self.damage, 0);
         try builder.appendTableFieldOffset(field_offsets.owners);
         return builder.endTable();
     }

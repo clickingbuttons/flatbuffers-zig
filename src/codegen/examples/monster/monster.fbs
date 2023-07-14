@@ -7,7 +7,7 @@ struct Vec4 { v:[float:4]; }
 
 table Monster {
 	pos:Vec3;
-	mana:short = 150;
+	mana:short;
 	hp:short = 100;
 	name:string;
 	friendly:bool = false (deprecated);
