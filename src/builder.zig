@@ -72,6 +72,7 @@ pub const Builder = struct {
     }
 
     pub fn prependVector(self: *Self, comptime T: type, slice: []const T) !Offset {
+        if (slice.len == 0) return 0;
         const n_bytes = @sizeOf(T) * slice.len;
         try self.prep(Offset, n_bytes);
         try self.prep(T, n_bytes);
@@ -87,6 +88,7 @@ pub const Builder = struct {
     }
 
     pub fn prependOffsets(self: *Self, offsets: []Offset) !Offset {
+        if (offsets.len == 0) return 0;
         const n_bytes = @sizeOf(u32) * offsets.len;
         try self.prep(Offset, n_bytes);
         // These have to be relative to themselves.
@@ -100,6 +102,7 @@ pub const Builder = struct {
     }
 
     pub fn prependVectorOffsets(self: *Self, comptime T: type, packable: []T) !Offset {
+        if (packable.len == 0) return 0;
         const allocator = self.buffer.allocator;
         var offsets = try allocator.alloc(u32, packable.len);
         defer allocator.free(offsets);
@@ -112,6 +115,7 @@ pub const Builder = struct {
 
     pub fn prependString(self: *Self, string: ?[]const u8) !Offset {
         if (string) |str| {
+            if (str.len == 0) return 0;
             try self.prep(Offset, str.len + 1);
             try self.buffer.prepend(@as(u8, 0));
             try self.buffer.prependSlice(str);
