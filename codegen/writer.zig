@@ -756,7 +756,7 @@ pub const CodeWriter = struct {
                             tmp_field_name,
                             field_type,
                             maybe_allocator_param,
-                            args.items[1].name,
+                            args.items[arg_index].name,
                             field_getter,
                         });
                     }
