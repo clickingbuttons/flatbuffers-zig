@@ -1,7 +1,7 @@
 # flatbuffers-zig
 
-![tests](https://github.com/clickingbuttons/flatbuffers-zig/actions/workflows/test.yml/badge.svg)
 ![zig-version](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fclickingbuttons%2Fflatbuffers-zig%2Fmaster%2F.github%2Fworkflows%2Ftest.yml&query=%24.jobs.test.steps%5B1%5D.with.version&label=zig-version)
+![tests](https://github.com/clickingbuttons/flatbuffers-zig/actions/workflows/test.yml/badge.svg)
 [![docs](https://github.com/clickingbuttons/flatbuffers-zig/actions/workflows/publish_docs.yml/badge.svg)](https://clickingbuttons.github.io/flatbuffers-zig)
 
 Library to read/write [flatbuffers](https://flatbuffers.dev/flatbuffers_internals.html) and CLI to generate Zig code from .fbs files.
