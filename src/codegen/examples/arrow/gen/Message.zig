@@ -43,10 +43,10 @@ pub const Message = struct {
         };
 
         try builder.startTable();
-        try builder.appendTableField(types.MetadataVersion, self.version);
-        try builder.appendTableField(types.PackedMessageHeader.Tag, self.header);
+        try builder.appendTableFieldWithDefault(types.MetadataVersion, self.version, .v1);
+        try builder.appendTableFieldWithDefault(types.PackedMessageHeader.Tag, self.header, .none);
         try builder.appendTableFieldOffset(field_offsets.header);
-        try builder.appendTableField(i64, self.body_length);
+        try builder.appendTableFieldWithDefault(i64, self.body_length, 0);
         try builder.appendTableFieldOffset(field_offsets.custom_metadata);
         return builder.endTable();
     }

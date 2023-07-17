@@ -3,10 +3,7 @@ const std = @import("std");
 pub const name = "flatbuffers";
 
 fn buildLib(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mode) *std.build.Module {
-    const module = b.addModule(name, .{
-        .source_file = .{ .path = "src/lib.zig" },
-        .dependencies = &.{},
-    });
+    const module = b.addModule(name, .{ .source_file = .{ .path = "src/lib.zig" } });
 
     const lib = b.addSharedLibrary(.{
         .name = name,
@@ -29,10 +26,13 @@ fn buildLib(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mo
         .optimize = optimize,
     });
     example_tests.addModule(name, module);
-    const run_example_tests = b.addRunArtifact(example_tests);
+    example_tests.addCSourceFile("./src/codegen/examples/arrow-cpp/verify.cpp", &.{});
+    example_tests.addIncludePath("./src/codegen/examples/arrow-cpp");
+    example_tests.linkLibCpp();
 
     const test_step = b.step("test", "Run library and example tests");
     test_step.dependOn(&run_main_tests.step);
+    const run_example_tests = b.addRunArtifact(example_tests);
     test_step.dependOn(&run_example_tests.step);
 
     return module;
