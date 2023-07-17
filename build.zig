@@ -1,33 +1,34 @@
 const std = @import("std");
 
 pub const name = "flatbuffers";
+const path = "./lib/lib.zig";
 
 fn buildLib(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mode) *std.build.Module {
-    const module = b.addModule(name, .{ .source_file = .{ .path = "src/lib.zig" } });
+    const module = b.addModule(name, .{ .source_file = .{ .path = path } });
 
     const lib = b.addSharedLibrary(.{
         .name = name,
-        .root_source_file = .{ .path = "src/lib.zig" },
+        .root_source_file = .{ .path = path },
         .target = target,
         .optimize = optimize,
     });
     b.installArtifact(lib);
 
     const tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/lib.zig" },
+        .root_source_file = .{ .path = path },
         .target = target,
         .optimize = optimize,
     });
     const run_main_tests = b.addRunArtifact(tests);
 
     const example_tests = b.addTest(.{
-        .root_source_file = .{ .path = "./src/codegen/examples/lib.zig" },
+        .root_source_file = .{ .path = "./codegen/examples/lib.zig" },
         .target = target,
         .optimize = optimize,
     });
     example_tests.addModule(name, module);
-    example_tests.addCSourceFile("./src/codegen/examples/arrow-cpp/verify.cpp", &.{});
-    example_tests.addIncludePath("./src/codegen/examples/arrow-cpp");
+    example_tests.addCSourceFile("./codegen/examples/arrow-cpp/verify.cpp", &.{});
+    example_tests.addIncludePath("./codegen/examples/arrow-cpp");
     example_tests.linkLibCpp();
 
     const test_step = b.step("test", "Run library and example tests");
@@ -53,7 +54,7 @@ fn buildExe(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mo
 
     const exe = b.addExecutable(.{
         .name = "flatc-zig",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = .{ .path = "./codegen/main.zig" },
         .target = target,
         .optimize = optimize,
     });
@@ -74,7 +75,7 @@ fn buildExe(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mo
     run_step.dependOn(&run_cmd.step);
 
     const codegen_tests = b.addTest(.{
-        .root_source_file = .{ .path = "./src/main.zig" },
+        .root_source_file = .{ .path = "./codegen/main.zig" },
         .target = target,
         .optimize = optimize,
     });

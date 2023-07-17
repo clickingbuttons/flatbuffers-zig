@@ -8,9 +8,6 @@ Library to read/write [flatbuffers](https://flatbuffers.dev/flatbuffers_internal
 ## Installation
 
 ### Install library
-Regardless of whether you use the code generator or write your own, you'll want to depend on this
-library which allows reading and writing flatbuffers.
-
 `build.zig.zon`
 ```zig
 .{
@@ -19,7 +16,7 @@ library which allows reading and writing flatbuffers.
 
     .dependencies = .{
         .@"flatbuffers-zig" = .{
-            .url = "https://github.com/clickingbuttons/lz4/archive/refs/heads/master.tar.gz",
+            .url = "https://github.com/clickingbuttons/lz4/archive/refs/tags/latest-release.tar.gz",
         },
     },
 }
@@ -72,25 +69,12 @@ You can also create a gen step  in your `build.zig` like so:
 ```zig
 const gen_step = b.step("gen", "Run flatc-zig for codegen");
 your_lib_or_exe.step.dependOn(gen_step);
-const ipc_gen_dir = try std.fs.path.join(b.allocator, &[_][]const u8{
-    "src",
-    "ipc",
-    "gen",
-});
-defer b.allocator.free(ipc_gen_dir);
-const ipc_fbs_dir = try std.fs.path.join(b.allocator, &[_][]const u8{
-    "src",
-    "ipc",
-    "format",
-});
-defer b.allocator.free(ipc_fbs_dir);
-const flatc = flatbuffers_dep.artifact("flatc-zig");
-const run_flatc = b.addRunArtifact(flatc);
+const run_flatc = b.addRunArtifact(flatbuffers_dep.artifact("flatc-zig"));
 run_flatc.addArgs(&[_][]const u8{
     "--input-dir",
-    ipc_fbs_dir,
+    "./path_to_fbs_dir",
     "--output-dir",
-    ipc_gen_dir,
+    "./path_to_output_dir",
 });
 ```
 

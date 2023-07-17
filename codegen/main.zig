@@ -1,9 +1,11 @@
 const std = @import("std");
 const clap = @import("clap");
 const build_options = @import("build_options");
-const bfbs = @import("./codegen/bfbs.zig").bfbs;
-const codegen = @import("./codegen/lib.zig");
-const Case = @import("./codegen/util.zig").Case;
+const bfbs = @import("./bfbs.zig").bfbs;
+const CodeWriter = @import("./writer.zig").CodeWriter;
+const Options = @import("./types.zig").Options;
+const codegen = @import("./codegen.zig").codegen;
+const Case = @import("./util.zig").Case;
 
 fn fatal(comptime T: type, msg: []const u8) T {
     std.debug.print("{s}\n", .{msg});
@@ -11,7 +13,7 @@ fn fatal(comptime T: type, msg: []const u8) T {
     unreachable;
 }
 
-fn walk(opts: codegen.Options) !void {
+fn walk(opts: Options) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
@@ -33,7 +35,7 @@ fn walk(opts: codegen.Options) !void {
         defer allocator.free(genned_bytes);
         // std.debug.print("genned {d} bytes\n", .{genned_bytes.len});
 
-        try codegen.codegen(allocator, fbs_path, genned_bytes, opts);
+        try codegen(allocator, fbs_path, genned_bytes, opts);
     }
 }
 
@@ -69,7 +71,7 @@ pub fn main() !void {
     const documentation = res.args.@"no-documentation" == 0;
     const function_case = Case.fromString(res.args.@"function-case" orelse "camel") orelse fatal(Case, "invalid function case");
 
-    try walk(codegen.Options{
+    try walk(Options{
         .extension = extension,
         .input_dir = input_dir,
         .output_dir = output_dir,
@@ -81,5 +83,5 @@ pub fn main() !void {
 }
 
 test {
-    _ = @import("./codegen/codegen.zig");
+    _ = @import("./codegen.zig");
 }
