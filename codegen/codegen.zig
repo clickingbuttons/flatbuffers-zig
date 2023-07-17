@@ -332,10 +332,8 @@ test "non allocated union" {
         \\    const Self = @This();
         \\
         \\    pub fn init(packed_: PackedBaz) flatbuffers.Error!Self {
-        \\        const bar_ = try Bar.init(try packed_.bar());
-        \\        errdefer {}
         \\        return .{
-        \\            .bar = bar_,
+        \\            .bar = try packed_.bar(),
         \\        };
         \\    }
         \\

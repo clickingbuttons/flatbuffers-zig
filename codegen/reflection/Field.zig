@@ -85,8 +85,7 @@ pub const Field = struct {
     pub fn isAllocated(self: Self, schema: types.Schema) bool {
         return switch (self.type.base_type) {
             .vector, .string => true,
-            .obj, .@"union" => !self.isStruct(schema) and !self.type.isEmpty(schema),
-            else => false,
+            else => if (self.type.child(schema)) |child| child.isAllocated(schema) else false,
         };
     }
 };

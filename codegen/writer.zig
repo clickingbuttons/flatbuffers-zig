@@ -710,6 +710,7 @@ pub const CodeWriter = struct {
             const field_type = try self.getType(field.type);
             const field_getter = try self.getFunctionName(field.name);
             const arg_index: usize = if (has_allocations) 1 else 0;
+            const field_allocated = field.isAllocated(self.schema);
 
             switch (field.type.base_type) {
                 .vector => {
@@ -727,7 +728,7 @@ pub const CodeWriter = struct {
                     });
                 },
                 .obj, .@"union" => brk: {
-                    if (field.isStruct(self.schema) or field.type.isEmpty(self.schema)) break :brk;
+                    if (!field_allocated) break :brk;
 
                     const child = field.type.child(self.schema).?;
                     const maybe_allocator_param = if (child.isAllocated(self.schema))
@@ -774,7 +775,7 @@ pub const CodeWriter = struct {
                 },
                 else => {},
             }
-            if (field.isAllocated(self.schema)) {
+            if (field_allocated) {
                 try writer.writeAll(
                     \\
                     \\errdefer {

@@ -46,6 +46,7 @@ pub const ChildType = union(enum) {
     }
 
     pub fn isAllocated(self: Self, schema: types.Schema) bool {
+        if (self.isEmpty()) return false;
         return switch (self) {
             .@"enum" => |e| e.isAllocated(schema),
             .object => |o| o.isAllocated(schema),
