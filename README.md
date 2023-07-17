@@ -6,7 +6,7 @@
 
 Library to read/write [flatbuffers](https://flatbuffers.dev/flatbuffers_internals.html) and CLI to generate Zig code from .fbs files.
 
-## Installation
+## Usage
 
 ### Install library
 `build.zig.zon`
