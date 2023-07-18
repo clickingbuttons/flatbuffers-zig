@@ -17,7 +17,7 @@ Library to read/write [flatbuffers](https://flatbuffers.dev/flatbuffers_internal
 
     .dependencies = .{
         .@"flatbuffers-zig" = .{
-            .url = "https://github.com/clickingbuttons/lz4/archive/refs/tags/latest-release.tar.gz",
+            .url = "https://github.com/clickingbuttons/flatbuffers-zig/archive/refs/tags/latest-release.tar.gz",
         },
     },
 }
