@@ -29,8 +29,7 @@ const flatbuffers_dep = b.dependency("flatbuffers-zig", .{
     .target = target,
     .optimize = optimize,
 });
-const flatbuffers_mod = flatbuffers_dep.module("flatbuffers");
-your_lib_or_exe.addModule("flatbuffers", flatbuffers_mod);
+your_lib_or_exe.addModule("flatbuffers", flatbuffers_dep.module("flatbuffers"));
 ```
 
 Run `zig build` and then copy the expected hash into `build.zig.zon`.

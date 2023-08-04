@@ -3,7 +3,11 @@ const std = @import("std");
 pub const name = "flatbuffers";
 const path = "./lib/lib.zig";
 
-fn buildLib(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mode) *std.build.Module {
+fn buildLib(
+    b: *std.Build,
+    target: std.zig.CrossTarget,
+    optimize: std.builtin.Mode,
+) *std.build.Module {
     const module = b.addModule(name, .{ .source_file = .{ .path = path } });
 
     const lib = b.addSharedLibrary(.{
@@ -27,8 +31,8 @@ fn buildLib(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mo
         .optimize = optimize,
     });
     example_tests.addModule(name, module);
-    example_tests.addCSourceFile("./codegen/examples/arrow-cpp/verify.cpp", &.{});
-    example_tests.addIncludePath("./codegen/examples/arrow-cpp");
+    example_tests.addCSourceFile(.{ .file = .{ .path = "./codegen/examples/arrow-cpp/verify.cpp" }, .flags = &.{} });
+    example_tests.addIncludePath(.{ .path = "./codegen/examples/arrow-cpp" });
     example_tests.linkLibCpp();
 
     const test_step = b.step("test", "Run library and example tests");
@@ -39,8 +43,13 @@ fn buildLib(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mo
     return module;
 }
 
-fn buildExe(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mode, module: *std.Build.Module) void {
-    const flatbuffers_cpp_dep = b.dependency("flatbuffers", .{
+fn buildExe(
+    b: *std.Build,
+    target: std.zig.CrossTarget,
+    optimize: std.builtin.Mode,
+    module: *std.Build.Module,
+) void {
+    const flatbuffers_cpp_dep = b.dependency(name, .{
         .target = target,
         .optimize = optimize,
     });

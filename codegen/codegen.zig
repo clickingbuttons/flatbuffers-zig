@@ -30,15 +30,7 @@ fn getFilename(allocator: Allocator, opts: Options, name: []const u8) ![]const u
 }
 
 fn createFile(fname: []const u8, flags: std.fs.File.CreateFlags) !std.fs.File {
-    if (std.fs.path.dirname(fname)) |dir| {
-        std.fs.cwd().makePath(dir) catch |e| switch (e) {
-            error.PathAlreadyExists => {},
-            else => {
-                log.err("couldn't make dir {?s}", .{dir});
-                return e;
-            },
-        };
-    }
+    if (std.fs.path.dirname(fname)) |dir| try std.fs.cwd().makePath(dir);
 
     return try std.fs.cwd().createFile(fname, flags);
 }
