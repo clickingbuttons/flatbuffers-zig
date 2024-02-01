@@ -17,7 +17,7 @@ pub const Builder = struct {
     vtable: VTable,
     vtables: VTables,
     table_start: Offset = 0,
-    min_alignment: usize = 1,
+    min_alignment: usize = @sizeOf(Offset),
 
     const Self = @This();
 
@@ -208,7 +208,7 @@ pub const Builder = struct {
     }
 
     pub fn finish(self: *Self, root: Offset) ![]u8 {
-        try self.prepAdvanced(@sizeOf(Offset), self.min_alignment);
+        try self.prepAdvanced(self.min_alignment, @sizeOf(Offset));
         try self.prependOffset(root);
 
         self.deinitAdvanced(false);
@@ -471,7 +471,10 @@ test "build monster" {
     // less monster_data.afb
     try testing.expectEqualSlices(u8, &[_]u8{
         // header 0x00
-        0x20, 0, 0, 0, // offset to root table `Monster`
+        0x2C, 0, 0, 0, // offset to root table `Monster`
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0, // padding (align to 16)
 
         // vtable (Monster) 0x10
         0x1C, 0, // vtable len

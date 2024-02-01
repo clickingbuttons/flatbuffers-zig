@@ -24,11 +24,9 @@ pub const DictionaryEncoding = struct {
     const Self = @This();
 
     pub fn init(packed_: PackedDictionaryEncoding) flatbuffers.Error!Self {
-        const index_type_ = if (try packed_.indexType()) |i| try types.Int.init(i) else null;
-        errdefer {}
         return .{
             .id = try packed_.id(),
-            .index_type = index_type_,
+            .index_type = try packed_.indexType(),
             .is_ordered = try packed_.isOrdered(),
             .dictionary_kind = try packed_.dictionaryKind(),
         };

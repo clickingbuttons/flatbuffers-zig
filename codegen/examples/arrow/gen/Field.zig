@@ -33,8 +33,6 @@ pub const Field = struct {
         errdefer {
             @"type".deinit(allocator);
         }
-        const dictionary_ = if (try packed_.dictionary()) |d| try types.DictionaryEncoding.init(d) else null;
-        errdefer {}
         const children_ = try flatbuffers.unpackVector(allocator, types.Field, packed_, "children");
         errdefer {
             for (children_) |c| c.deinit(allocator);
@@ -49,7 +47,7 @@ pub const Field = struct {
             .name = name_,
             .nullable = try packed_.nullable(),
             .type = @"type",
-            .dictionary = dictionary_,
+            .dictionary = try packed_.dictionary(),
             .children = children_,
             .custom_metadata = custom_metadata_,
         };

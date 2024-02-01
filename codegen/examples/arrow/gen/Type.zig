@@ -32,6 +32,10 @@ pub const Type = union(PackedType.Tag) {
     large_utf8: types.LargeUtf8,
     large_list: types.LargeList,
     run_end_encoded: types.RunEndEncoded,
+    binary_view: types.BinaryView,
+    utf8_view: types.Utf8View,
+    list_view: types.ListView,
+    large_list_view: types.LargeListView,
 
     const Self = @This();
 
@@ -60,6 +64,10 @@ pub const Type = union(PackedType.Tag) {
             .large_utf8 => .{ .large_utf8 = .{} },
             .large_list => .{ .large_list = .{} },
             .run_end_encoded => .{ .run_end_encoded = .{} },
+            .binary_view => .{ .binary_view = .{} },
+            .utf8_view => .{ .utf8_view = .{} },
+            .list_view => .{ .list_view = .{} },
+            .large_list_view => .{ .large_list_view = .{} },
         };
     }
 
@@ -116,6 +124,10 @@ pub const PackedType = union(enum) {
     large_utf8: types.PackedLargeUtf8,
     large_list: types.PackedLargeList,
     run_end_encoded: types.PackedRunEndEncoded,
+    binary_view: types.PackedBinaryView,
+    utf8_view: types.PackedUtf8View,
+    list_view: types.PackedListView,
+    large_list_view: types.PackedLargeListView,
 
     pub const Tag = std.meta.Tag(@This());
 };

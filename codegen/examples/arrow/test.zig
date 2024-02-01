@@ -5,9 +5,11 @@ const Builder = @import("flatbuffers").Builder;
 const testing = std.testing;
 const Footer = arrow_mod.Footer;
 const PackedFooter = arrow_mod.PackedFooter;
+const PackedMessage = arrow_mod.PackedMessage;
 const Schema = arrow_mod.Schema;
 const Field = arrow_mod.Field;
 const Type = arrow_mod.Type;
+const Message = arrow_mod.Message;
 
 const fields = &[_]Field{
     .{
@@ -34,10 +36,18 @@ const fields = &[_]Field{
     },
 };
 
-const example_schema = Schema{
+pub const example_schema = Schema{
     .fields = @constCast(fields),
     .custom_metadata = &.{},
     .features = &.{},
+};
+
+pub const example_message = Message{
+    .header = arrow_mod.MessageHeader{
+        .schema = example_schema,
+    },
+    .body_length = 100,
+    .custom_metadata = &.{},
 };
 
 pub const example_footer = arrow_mod.Footer{
@@ -47,8 +57,7 @@ pub const example_footer = arrow_mod.Footer{
     .custom_metadata = &.{},
 };
 
-fn testPackedFooter(footer: PackedFooter) !void {
-    const schema = (try footer.schema()).?;
+fn testSchema(schema: arrow_mod.PackedSchema) !void {
     try testing.expectEqual(@as(usize, 2), try schema.fieldsLen());
 
     const field_a = try schema.fields(0);
@@ -86,5 +95,24 @@ test "build footer, pack, and unpack" {
     defer testing.allocator.free(bytes);
 
     const footer = try PackedFooter.init(bytes);
-    try testPackedFooter(footer);
+    const schema = (try footer.schema()).?;
+
+    try testSchema(schema);
+}
+
+test "build message, pack, and unpack" {
+    var builder = Builder.init(testing.allocator);
+    const offset = try example_message.pack(&builder);
+    const bytes = try builder.finish(offset);
+    defer testing.allocator.free(bytes);
+
+    std.debug.print("wrote file\n", .{});
+    const file = try std.fs.cwd().createFile("message.bfbs", .{});
+    try file.writeAll(bytes);
+
+    const message = try PackedMessage.init(bytes);
+    const header = try message.header();
+    const schema = header.schema;
+
+    try testSchema(schema);
 }
